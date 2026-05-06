@@ -186,8 +186,8 @@ assign CE_PIXEL  = ce_pix;
 
 assign VGA_SL = 0;
 assign VGA_F1 = 0;
-assign VIDEO_ARX = 0;
-assign VIDEO_ARY = 0;
+assign VIDEO_ARX = 13'd4;
+assign VIDEO_ARY = 13'd3;
 assign VGA_SCALER= 0;
 assign VGA_DISABLE = 0;
 
@@ -209,7 +209,7 @@ assign LED_POWER[0]= FB ? led[2] : act_cnt2[26] ? act_cnt2[25:18] > act_cnt2[7:0
 
 `include "build_id.v" 
 localparam CONF_STR = {
-	"MENU;UART31250,MIDI;",
+	"Zaparoo Launcher;UART31250,MIDI;",
 	"-;",
 	"V,v",`BUILD_DATE 
 };
@@ -336,36 +336,14 @@ always @(posedge clk_sys) begin
 					state      <= state+1'd1;
 				end
 			16: begin
-					sdram_addr <= addr[24:0];
-					sdram_din  <= 0;
-					sdram_we   <= we;
+					sdram_we <= 0;
 				end
 		endcase
 	end
 end
 
-ddram ddr
-(
-	.*,
-	.reset(RESET),
-   .dout(),
-   .din(0),
-   .rd(0),
-   .ready()
-);
-
-reg        we;
-reg [28:0] addr = 0;
-
-always @(posedge clk_sys) begin
-	reg [4:0] cnt = 9;
-
-	if(~RESET & cfg[15]) begin
-		cnt <= cnt + 1'b1;
-		we <= &cnt;
-		if(cnt == 8) addr <= addr + 1'd1;
-	end
-end
+// DDR clear helper removed for Zaparoo native video. The ARM launcher owns
+// the RGBX8888 frame buffers; the FPGA only reads them.
 
 ////////////////////////////  MT32pi  ////////////////////////////////// 
 
@@ -492,9 +470,6 @@ wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_
 lfsr #(lfsr_n) random(rnd);
 
 always @(posedge CLK_VIDEO) begin
-	if(forced_scandoubler) ce_pix <= 1;
-		else ce_pix <= ~ce_pix;
-
 	if(ce_pix) begin
 		if(hc == 637) begin
 			hc <= 0;
@@ -518,7 +493,12 @@ reg VBlank;
 reg VSync;
 
 reg ce_pix;
+reg [1:0] ce_div;
 always @(posedge CLK_VIDEO) begin
+	if(RESET) ce_div <= 2'd0;
+		else ce_div <= ce_div + 2'd1;
+	ce_pix <= (ce_div == 2'd0);
+
 	if (hc == 529) HBlank <= 1;
 		else if (hc == 0) HBlank <= 0;
 
@@ -550,11 +530,48 @@ cos cos(vvc + {vc>>forced_scandoubler, 2'b00}, cos_out);
 
 wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
 
-assign VGA_DE  = ~(HBlank | VBlank);
-assign VGA_HS  = HSync;
-assign VGA_VS  = VSync;
-assign VGA_G   = comp_v;
-assign VGA_R   = comp_v;
-assign VGA_B   = comp_v;
+wire [7:0] native_r;
+wire [7:0] native_g;
+wire [7:0] native_b;
+wire       native_hs;
+wire       native_vs;
+wire       native_de;
+wire       native_active;
+
+native_video_top native_video
+(
+	.clk_sys        (clk_sys),
+	.clk_vid        (CLK_VIDEO),
+	.ce_pix         (ce_pix),
+	.reset          (RESET),
+
+	.ddr_busy       (DDRAM_BUSY),
+	.ddr_burstcnt   (DDRAM_BURSTCNT),
+	.ddr_addr       (DDRAM_ADDR),
+	.ddr_dout       (DDRAM_DOUT),
+	.ddr_dout_ready (DDRAM_DOUT_READY),
+	.ddr_rd         (DDRAM_RD),
+	.ddr_din        (DDRAM_DIN),
+	.ddr_be         (DDRAM_BE),
+	.ddr_we         (DDRAM_WE),
+
+	.vga_r          (native_r),
+	.vga_g          (native_g),
+	.vga_b          (native_b),
+	.vga_hs         (native_hs),
+	.vga_vs         (native_vs),
+	.vga_de         (native_de),
+	.vga_hblank     (),
+	.vga_vblank     (),
+	.enable         (cfg[15]),
+	.active         (native_active)
+);
+
+assign VGA_DE  = native_de;
+assign VGA_HS  = native_hs;
+assign VGA_VS  = native_vs;
+assign VGA_G   = native_active ? native_g : comp_v;
+assign VGA_R   = native_active ? native_r : comp_v;
+assign VGA_B   = native_active ? native_b : comp_v;
 
 endmodule
