@@ -278,9 +278,11 @@ wire [31:0] pixel_high_word = pixel_word[63:32];
 task automatic output_pixel;
 	input [31:0] pixel;
 	begin
-		r_out <= pixel[7:0];
+		// linuxfb write path lands as B,G,R,X in DDR on MiSTer; swap here
+		// so launcher can keep doing row memcpy with no CPU-side repack.
+		r_out <= pixel[23:16];
 		g_out <= pixel[15:8];
-		b_out <= pixel[23:16];
+		b_out <= pixel[7:0];
 	end
 endtask
 
