@@ -25,6 +25,8 @@ module native_video_top
 	output wire        vga_de,
 	output wire        vga_hblank,
 	output wire        vga_vblank,
+	output wire  [8:0] vga_vcount,
+	output wire        vga_new_frame,
 
 	input  wire        enable,
 	output wire        active
@@ -86,11 +88,13 @@ native_video_reader reader
 	.frame_ready    (frame_ready)
 );
 
-assign vga_hs     = tim_hs;
-assign vga_vs     = tim_vs;
-assign vga_de     = tim_de;
-assign vga_hblank = tim_hblank;
-assign vga_vblank = tim_vblank;
-assign active     = enable & frame_ready;
+assign vga_hs        = tim_hs;
+assign vga_vs        = tim_vs;
+assign vga_de        = tim_de;
+assign vga_hblank    = tim_hblank;
+assign vga_vblank    = tim_vblank;
+assign vga_vcount    = tim_vcount;
+assign vga_new_frame = tim_new_frame;
+assign active        = enable & frame_ready;
 
 endmodule

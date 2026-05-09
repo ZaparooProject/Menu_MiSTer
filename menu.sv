@@ -459,77 +459,21 @@ wire PAL = status[4];
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
 
-reg   [9:0] hc;
-reg   [9:0] vc;
-reg   [9:0] vvc;
-
-reg  [lfsr_n:0] rnd_reg;
-wire [lfsr_n:0] rnd;
-
-wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_reg[2]};
-
-lfsr #(lfsr_n) random(rnd);
-
+// Pixel clock: CLK_VIDEO = 27.027 MHz; ce_pix /4 = ~6.756 MHz, which gives
+// an NTSC-spec 15.734 kHz line rate when fed into native_video_timing
+// (H_TOTAL=429). Both the cosine fallback and the FB reader use this ce_pix.
+reg [1:0] ce_div;
+reg       ce_pix;
 always @(posedge CLK_VIDEO) begin
-	if(forced_scandoubler) ce_pix <= 1;
-		else ce_pix <= ~ce_pix;
-
-	if(ce_pix) begin
-		if(hc == 637) begin
-			hc <= 0;
-			if(vc == (PAL ? (forced_scandoubler ? 623 : 311) : (forced_scandoubler ? 523 : 261))) begin 
-				vc <= 0;
-				vvc <= vvc + 9'd6;
-			end else begin
-				vc <= vc + 1'd1;
-			end
-		end else begin
-			hc <= hc + 1'd1;
-		end
-
-		rnd_reg <= rnd;
-	end
+	if (RESET) ce_div <= 2'd0;
+		else  ce_div <= ce_div + 2'd1;
+	ce_pix <= (ce_div == 2'd0);
 end
 
-reg HBlank;
-reg HSync;
-reg VBlank;
-reg VSync;
-
-reg ce_pix;
-always @(posedge CLK_VIDEO) begin
-	if (hc == 529) HBlank <= 1;
-		else if (hc == 0) HBlank <= 0;
-
-	if (hc == 544) begin
-		HSync <= 1;
-
-		if(PAL) begin
-			if(vc == (forced_scandoubler ? 609 : 304)) VSync <= 1;
-				else if (vc == (forced_scandoubler ? 617 : 308)) VSync <= 0;
-
-			if(vc == (forced_scandoubler ? 601 : 300)) VBlank <= 1;
-				else if (vc == 0) VBlank <= 0;
-		end
-		else begin
-			if(vc == (forced_scandoubler ? 490 : 245)) VSync <= 1;
-				else if (vc == (forced_scandoubler ? 496 : 248)) VSync <= 0;
-
-			if(vc == (forced_scandoubler ? 480 : 240)) VBlank <= 1;
-				else if (vc == 0) VBlank <= 0;
-		end
-	end
-	
-	if (hc == 590) HSync <= 0;
-end
-
-reg  [7:0] cos_out;
-wire [5:0] cos_g = cos_out[7:3]+6'd32;
-cos cos(vvc + {vc>>forced_scandoubler, 2'b00}, cos_out);
-
-wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
-
-// Runtime FB-mode gate driven by the HPS-side launcher via status[9].
+// Native video timing + DDR reader. Timing outputs (sync, DE, vcount, frame
+// edge) are the SINGLE source of truth for VGA scanout in both modes — that's
+// what guarantees the CRT sees a clean 15.734 kHz line rate whether we're
+// painting cosine noise or reading a Linux-rendered framebuffer.
 wire mode_zaparoo = status[9];
 
 wire [7:0] native_r;
@@ -538,6 +482,8 @@ wire [7:0] native_b;
 wire       native_hs;
 wire       native_vs;
 wire       native_de;
+wire [8:0] native_vcount;
+wire       native_new_frame;
 wire       native_active;
 
 native_video_top native_video
@@ -565,22 +511,46 @@ native_video_top native_video
 	.vga_de         (native_de),
 	.vga_hblank     (),
 	.vga_vblank     (),
+	.vga_vcount     (native_vcount),
+	.vga_new_frame  (native_new_frame),
 	.enable         (mode_zaparoo),
 	.active         (native_active)
 );
 
-// Mode A (default): cosine+LFSR pattern drives RGB and the original PAL/NTSC
-// scandoubler timing drives sync/DE. HDMI wallpaper compositor runs unchanged.
-// Mode B (status[9]=1, frame ready): native_video_top drives RGB+sync from the
-// linux-rendered 320x240 RGBX8888 buffer in DDR. Falls back to cosine until the
-// first frame is loaded so the screen is never undriven.
+// Cosine + LFSR fallback noise pattern, painted into the 320x240 active area
+// of the shared native timing. vvc steps once per frame; the LFSR walks every
+// pixel; cos LUT is indexed by vvc + vcount so the pattern shifts vertically
+// over time. Outside the active area we drive black to keep sync clean.
+reg  [9:0] vvc;
+reg  [lfsr_n:0] rnd_reg;
+wire [lfsr_n:0] rnd;
+wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_reg[2]};
+
+lfsr #(lfsr_n) random(rnd);
+
+always @(posedge CLK_VIDEO) begin
+	if (RESET) vvc <= 10'd0;
+		else if (native_new_frame) vvc <= vvc + 10'd6;
+	if (ce_pix) rnd_reg <= rnd;
+end
+
+reg  [7:0] cos_out;
+wire [5:0] cos_g = cos_out[7:3] + 6'd32;
+cos cos(vvc + {native_vcount, 2'b00}, cos_out);
+
+wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
+
+// Mode A (default): cosine pattern paints into the native active area.
+// Mode B (status[9]=1, frame ready): DDR-read RGB replaces the cosine pattern.
+// Sync/DE come from the same native timing in both cases — the CRT sees one
+// continuous, NTSC-spec signal regardless of which RGB source is selected.
 wire use_native = mode_zaparoo & native_active;
 
-assign VGA_DE  = use_native ? native_de : ~(HBlank | VBlank);
-assign VGA_HS  = use_native ? native_hs : HSync;
-assign VGA_VS  = use_native ? native_vs : VSync;
-assign VGA_R   = use_native ? native_r  : comp_v;
-assign VGA_G   = use_native ? native_g  : comp_v;
-assign VGA_B   = use_native ? native_b  : comp_v;
+assign VGA_DE  = native_de;
+assign VGA_HS  = native_hs;
+assign VGA_VS  = native_vs;
+assign VGA_R   = use_native ? native_r : (native_de ? comp_v : 8'd0);
+assign VGA_G   = use_native ? native_g : (native_de ? comp_v : 8'd0);
+assign VGA_B   = use_native ? native_b : (native_de ? comp_v : 8'd0);
 
 endmodule
