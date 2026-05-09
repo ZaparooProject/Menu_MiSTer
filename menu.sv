@@ -336,36 +336,15 @@ always @(posedge clk_sys) begin
 					state      <= state+1'd1;
 				end
 			16: begin
-					sdram_addr <= addr[24:0];
-					sdram_din  <= 0;
-					sdram_we   <= we;
+					sdram_we <= 0;
 				end
 		endcase
 	end
 end
 
-ddram ddr
-(
-	.*,
-	.reset(RESET),
-   .dout(),
-   .din(0),
-   .rd(0),
-   .ready()
-);
-
-reg        we;
-reg [28:0] addr = 0;
-
-always @(posedge clk_sys) begin
-	reg [4:0] cnt = 9;
-
-	if(~RESET & cfg[15]) begin
-		cnt <= cnt + 1'b1;
-		we <= &cnt;
-		if(cnt == 8) addr <= addr + 1'd1;
-	end
-end
+// DDR clear loop removed: native_video_reader owns DDRAM_* signals.
+// When status[9]=0 the reader is held in idle (rd=0, we=0) and DDR is unused;
+// when status[9]=1 the reader takes over to fetch the linux-rendered framebuffer.
 
 ////////////////////////////  MT32pi  ////////////////////////////////// 
 
@@ -550,11 +529,58 @@ cos cos(vvc + {vc>>forced_scandoubler, 2'b00}, cos_out);
 
 wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
 
-assign VGA_DE  = ~(HBlank | VBlank);
-assign VGA_HS  = HSync;
-assign VGA_VS  = VSync;
-assign VGA_G   = comp_v;
-assign VGA_R   = comp_v;
-assign VGA_B   = comp_v;
+// Runtime FB-mode gate driven by the HPS-side launcher via status[9].
+wire mode_zaparoo = status[9];
+
+wire [7:0] native_r;
+wire [7:0] native_g;
+wire [7:0] native_b;
+wire       native_hs;
+wire       native_vs;
+wire       native_de;
+wire       native_active;
+
+native_video_top native_video
+(
+	.clk_sys        (clk_sys),
+	.clk_vid        (CLK_VIDEO),
+	.ce_pix         (ce_pix),
+	.reset          (RESET),
+
+	.ddr_busy       (DDRAM_BUSY),
+	.ddr_burstcnt   (DDRAM_BURSTCNT),
+	.ddr_addr       (DDRAM_ADDR),
+	.ddr_dout       (DDRAM_DOUT),
+	.ddr_dout_ready (DDRAM_DOUT_READY),
+	.ddr_rd         (DDRAM_RD),
+	.ddr_din        (DDRAM_DIN),
+	.ddr_be         (DDRAM_BE),
+	.ddr_we         (DDRAM_WE),
+
+	.vga_r          (native_r),
+	.vga_g          (native_g),
+	.vga_b          (native_b),
+	.vga_hs         (native_hs),
+	.vga_vs         (native_vs),
+	.vga_de         (native_de),
+	.vga_hblank     (),
+	.vga_vblank     (),
+	.enable         (mode_zaparoo),
+	.active         (native_active)
+);
+
+// Mode A (default): cosine+LFSR pattern drives RGB and the original PAL/NTSC
+// scandoubler timing drives sync/DE. HDMI wallpaper compositor runs unchanged.
+// Mode B (status[9]=1, frame ready): native_video_top drives RGB+sync from the
+// linux-rendered 320x240 RGBX8888 buffer in DDR. Falls back to cosine until the
+// first frame is loaded so the screen is never undriven.
+wire use_native = mode_zaparoo & native_active;
+
+assign VGA_DE  = use_native ? native_de : ~(HBlank | VBlank);
+assign VGA_HS  = use_native ? native_hs : HSync;
+assign VGA_VS  = use_native ? native_vs : VSync;
+assign VGA_R   = use_native ? native_r  : comp_v;
+assign VGA_G   = use_native ? native_g  : comp_v;
+assign VGA_B   = use_native ? native_b  : comp_v;
 
 endmodule
