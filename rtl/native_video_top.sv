@@ -29,7 +29,11 @@ module native_video_top
 	output wire        vga_new_frame,
 
 	input  wire        enable,
-	output wire        active
+	output wire        active,
+
+	// OSD image centering: signed -8..+7 pixels/lines, 0 = no shift.
+	input  wire signed [3:0] h_offset,
+	input  wire signed [3:0] v_offset
 );
 
 wire       tim_hs;
@@ -46,6 +50,8 @@ native_video_timing timing
 	.clk       (clk_vid),
 	.ce_pix    (ce_pix),
 	.reset     (reset),
+	.h_offset  (h_offset),
+	.v_offset  (v_offset),
 	.hsync     (tim_hs),
 	.vsync     (tim_vs),
 	.hblank    (tim_hblank),

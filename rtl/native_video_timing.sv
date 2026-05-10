@@ -1,10 +1,17 @@
 // Zaparoo native video timing: 320x240 at 15.734 kHz from 27 MHz / 4.
+// h_offset/v_offset (signed -8..+7) shift the image by repartitioning
+// front porch and back porch. H_TOTAL/V_TOTAL are invariant, so line
+// rate and frame rate are unchanged regardless of offset values.
 
 module native_video_timing
 (
 	input  wire       clk,
 	input  wire       ce_pix,
 	input  wire       reset,
+
+	// Image centering: positive = shift right/down (FP shrinks, BP grows).
+	input  wire signed [3:0] h_offset,  // -8..+7 pixels (budget H_FP=14 / H_BP=63)
+	input  wire signed [3:0] v_offset,  // -8..+7 lines  (budget V_FP=8 / V_BP=11)
 
 	output reg        hsync,
 	output reg        vsync,
@@ -23,16 +30,20 @@ localparam [5:0] H_SYNC   = 6'd32;
 localparam [9:0] H_BP     = 10'd63;
 localparam [9:0] H_TOTAL  = 10'd429;
 
+// V blanking rebalanced from 6/3/13 to 8/3/11 to give symmetric ±8 budget
+// while preserving V_TOTAL=262 (and thus 59.94 Hz refresh).
 localparam [8:0] V_ACTIVE = 9'd240;
-localparam [8:0] V_FP     = 9'd6;
+localparam [8:0] V_FP     = 9'd8;
 localparam [4:0] V_SYNC   = 5'd3;
-localparam [8:0] V_BP     = 9'd13;
+localparam [8:0] V_BP     = 9'd11;
 localparam [8:0] V_TOTAL  = 9'd262;
 
-localparam [9:0] H_SYNC_START = H_ACTIVE + H_FP;
-localparam [9:0] H_SYNC_END   = H_SYNC_START + H_SYNC;
-localparam [8:0] V_SYNC_START = V_ACTIVE + V_FP;
-localparam [8:0] V_SYNC_END   = V_SYNC_START + V_SYNC;
+// Sync starts shift with the offset; two's-complement subtraction in
+// unsigned arithmetic yields the correct result at both ends of the range.
+wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{6{h_offset[3]}}, h_offset});
+wire [9:0] H_SYNC_END   = H_SYNC_START + H_SYNC;
+wire [8:0] V_SYNC_START = V_ACTIVE + (V_FP - {{5{v_offset[3]}}, v_offset});
+wire [8:0] V_SYNC_END   = V_SYNC_START + V_SYNC;
 
 always @(posedge clk) begin
 	if(reset) begin
