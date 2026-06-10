@@ -1,7 +1,6 @@
 // Zaparoo native video timing: 320x240 at 15.734 kHz from 27 MHz / 4.
-// h_offset/v_offset (signed -8..+7) shift the image by repartitioning
-// front porch and back porch. H_TOTAL/V_TOTAL are invariant, so line
-// rate and frame rate are unchanged regardless of offset values.
+// h_offset/v_offset shift the image by repartitioning front porch and back
+// porch. H_TOTAL/V_TOTAL are invariant, so line/frame rates stay unchanged.
 
 module native_video_timing
 (
@@ -10,8 +9,8 @@ module native_video_timing
 	input  wire       reset,
 
 	// Image centering: positive = shift right/down (FP shrinks, BP grows).
-	input  wire signed [3:0] h_offset,  // -8..+7 pixels (budget H_FP=14 / H_BP=63)
-	input  wire signed [3:0] v_offset,  // -8..+7 lines  (budget V_FP=8 / V_BP=11)
+	input  wire signed [5:0] h_offset,  // -32..+31 pixels (budget H_FP=38 / H_BP=39)
+	input  wire signed [3:0] v_offset,  // -8..+7 lines   (budget V_FP=8 / V_BP=11)
 
 	output reg        hsync,
 	output reg        vsync,
@@ -25,9 +24,11 @@ module native_video_timing
 );
 
 localparam [9:0] H_ACTIVE = 10'd320;
-localparam [9:0] H_FP     = 10'd14;
+// 38/32/39 keeps total blanking fixed while moving the default image 24 px
+// left from the earlier CRT-specific 14/32/63 porch split.
+localparam [9:0] H_FP     = 10'd38;
 localparam [5:0] H_SYNC   = 6'd32;
-localparam [9:0] H_BP     = 10'd63;
+localparam [9:0] H_BP     = 10'd39;
 localparam [9:0] H_TOTAL  = 10'd429;
 
 // V blanking rebalanced from 6/3/13 to 8/3/11 to give symmetric ±8 budget
@@ -40,7 +41,7 @@ localparam [8:0] V_TOTAL  = 9'd262;
 
 // Sync starts shift with the offset; two's-complement subtraction in
 // unsigned arithmetic yields the correct result at both ends of the range.
-wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{6{h_offset[3]}}, h_offset});
+wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{4{h_offset[5]}}, h_offset});
 wire [9:0] H_SYNC_END   = H_SYNC_START + H_SYNC;
 wire [8:0] V_SYNC_START = V_ACTIVE + (V_FP - {{5{v_offset[3]}}, v_offset});
 wire [8:0] V_SYNC_END   = V_SYNC_START + V_SYNC;

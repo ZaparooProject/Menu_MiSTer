@@ -31,8 +31,8 @@ module native_video_top
 	input  wire        enable,
 	output wire        active,
 
-	// OSD image centering: signed -8..+7 pixels/lines, 0 = no shift.
-	input  wire signed [3:0] h_offset,
+	// OSD image centering: 0 = default porch split.
+	input  wire signed [5:0] h_offset,
 	input  wire signed [3:0] v_offset
 );
 

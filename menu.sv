@@ -208,14 +208,13 @@ assign LED_POWER[0]= FB ? led[2] : act_cnt2[26] ? act_cnt2[25:18] > act_cnt2[7:0
 
 
 `include "build_id.v" 
-// Image centering: 4-bit signed in OSD ordering 0,+1..+7,-8..-1 so that the
-// power-on default (status bits = 0) maps to "no shift". Bit pattern matches
-// 4-bit two's complement when reinterpreted as signed.
+// Image centering options use signed two's-complement ordering with 0 first,
+// so the power-on default (status bits = 0) selects the calibrated base timing.
 localparam CONF_STR = {
 	"MENU;UART31250,MIDI;",
 	"-;",
-	"O[13:10],H Offset,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
-	"O[17:14],V Offset,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"O[15:10],H Offset,0,+1,+2,+3,+4,+5,+6,+7,+8,+9,+10,+11,+12,+13,+14,+15,+16,+17,+18,+19,+20,+21,+22,+23,+24,+25,+26,+27,+28,+29,+30,+31,-32,-31,-30,-29,-28,-27,-26,-25,-24,-23,-22,-21,-20,-19,-18,-17,-16,-15,-14,-13,-12,-11,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"O[19:16],V Offset,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"-;",
 	"V,v",`BUILD_DATE
 };
@@ -522,12 +521,10 @@ native_video_top native_video
 	.enable         (mode_zaparoo),
 	.active         (native_active),
 
-	// status[13:10] / status[17:14] are 4-bit fields whose bit pattern
-	// matches signed two's complement when the OSD enum is ordered
-	// 0,+1..+7,-8..-1 (see CONF_STR). $signed() makes the reinterpretation
-	// explicit at the port boundary.
-	.h_offset       ($signed(status[13:10])),
-	.v_offset       ($signed(status[17:14]))
+	// Status bit patterns match signed two's complement because CONF_STR orders
+	// each OSD enum as 0,+1..max,min..-1. $signed() makes that explicit here.
+	.h_offset       ($signed(status[15:10])),
+	.v_offset       ($signed(status[19:16]))
 );
 
 // Cosine + LFSR fallback noise pattern, painted into the 320x240 active area
