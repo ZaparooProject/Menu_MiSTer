@@ -1,3 +1,5 @@
+set_global_assignment -name QIP_FILE rtl/pll_video.qip
+set_global_assignment -name SDC_FILE menu.sdc
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram.sv
 set_global_assignment -name VERILOG_FILE rtl/lfsr.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cos.sv

@@ -237,8 +237,19 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(clk_sys),
-	.outclk_1(CLK_VIDEO),
+	.outclk_1(),         // stock 27.027 MHz output, unused (see pll_video)
 	.locked(locked)
+);
+
+// Exact 27.000000 MHz video clock from its own PLL: 27 MHz can't share a
+// VCO with the 100 MHz clk_sys (lcm = 2700 MHz, above the VCO ceiling).
+wire vid_locked;
+pll_video pll_video
+(
+	.refclk(CLK_50M),
+	.rst(0),
+	.outclk_0(CLK_VIDEO),
+	.locked(vid_locked)
 );
 
 
@@ -472,7 +483,7 @@ wire [1:0] native_mode;
 reg [1:0] ce_div;
 reg       ce_pix;
 always @(posedge CLK_VIDEO) begin
-	if (RESET) ce_div <= 2'd0;
+	if (RESET | ~vid_locked) ce_div <= 2'd0;
 		else  ce_div <= ce_div + 2'd1;
 	ce_pix <= (native_mode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
 end
@@ -498,7 +509,7 @@ native_video_top native_video
 	.clk_sys        (clk_sys),
 	.clk_vid        (CLK_VIDEO),
 	.ce_pix         (ce_pix),
-	.reset          (RESET),
+	.reset          (RESET | ~vid_locked),
 
 	.ddr_busy       (DDRAM_BUSY),
 	.ddr_burstcnt   (DDRAM_BURSTCNT),

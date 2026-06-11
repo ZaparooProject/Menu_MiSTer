@@ -145,9 +145,17 @@ geometry (section 4) plus safe-area UI rules (section 6).
 
 ## 4. Target timings
 
-Everything derives from **one PLL change**: output 1 of `rtl/pll/pll_0002.v`
-goes from 27.027027 MHz to **27.000000 MHz** — the universal SD video clock
-(it is exactly 1716 × NTSC line rate and 1728 × PAL line rate).
+Everything derives from one clock change: CLK_VIDEO goes from 27.027027 MHz
+to **27.000000 MHz** — the universal SD video clock (it is exactly 1716 ×
+NTSC line rate and 1728 × PAL line rate).
+
+> **Implementation note (found at fit time):** 27.000 MHz cannot come from
+> the existing PLL. All outputs of one PLL divide a shared VCO, and
+> lcm(100 MHz clk_sys, 27 MHz) = 2700 MHz exceeds the Cyclone V's
+> 600–1600 MHz VCO range — 27.027027 (1000 MHz / 37) is precisely the
+> closest sharable frequency, which is why stock MiSTer uses it. The fix is
+> a dedicated video PLL (`rtl/pll_video.v`, VCO 1350 MHz = 50 × 27, C = 50)
+> whose sole output drives CLK_VIDEO; `pll_0002.v` stays stock.
 
 | Mode | ce_pix | H total | H active / FP / sync / BP (px) | V total | V active / FP / sync / BP (lines) | Line rate | Refresh |
 |---|---|---|---|---|---|---|---|
@@ -348,9 +356,12 @@ These are as much a part of the fix as the RTL — geometry alone doesn't solve
 
 FPGA (this repo):
 
-1. **`rtl/pll/pll_0002.v`**: `output_clock_frequency1` 27.027027 MHz →
-   `27.000000 MHz`. (Same single-line style as the earlier 20→27.027 change;
-   no other PLL params move.)
+1. ~~`rtl/pll/pll_0002.v`: `output_clock_frequency1` 27.027027 MHz →
+   `27.000000 MHz`.~~ Superseded: the shared PLL cannot fit 27.000 MHz (see
+   the implementation note in §4). Instead `pll_0002.v` stays stock and a
+   new dedicated `rtl/pll_video.v` (+ `rtl/pll_video/pll_video_0002.v`,
+   `rtl/pll_video.qip`) generates CLK_VIDEO = 27.000000 MHz; menu.sv holds
+   the native video path in reset until it locks.
 2. **`rtl/native_video_timing.sv`**: mode-0 constants — H 352/12/32/33,
    V 240/3/3/16. Structure the constants as per-mode parameter sets selected
    by a `mode` input (tied to 0 until Phases B/C) so later modes are additive.
