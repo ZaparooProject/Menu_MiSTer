@@ -7,7 +7,9 @@ repo) has the full background and rationale if you want it.
 FPGA side of everything below is implemented, simulated, and pushed. The
 launcher work in this brief is the only remaining piece.
 **Existing code this modifies:** `src/app/native_video_writer.cpp` and the
-`--crt` startup path in zaparoo-launcher (see also its `docs/native-core-poc.md`).
+`--crt` startup path in zaparoo-launcher (see also its `docs/native-core-poc.md`),
+plus `support/zaparoo/alt_launcher.cpp` / `launcher_pages.cpp` in the
+Main_MiSTer fork (section 3).
 
 ---
 
@@ -24,10 +26,13 @@ control block you already write**. Key consequences for the app:
   correctly calibrated CRT.
 - The picture now *overscans* like broadcast TV: the outer few percent of the
   framebuffer is cropped on most sets. The UI must adopt safe-area rules
-  (section 5) — this is as much a part of the fix as the FPGA work.
-- There is no "CRT mode" toggle anywhere. **Publishing frames IS the mode
-  switch**: the core shows its noise pattern until your control word goes
-  live and reverts when you zero it.
+  (section 6) — this is as much a part of the fix as the FPGA work.
+- The *core-side* CRT enable is gone: the new core has no `status[9]` bit
+  and no OSD video options. **Publishing frames IS the core's mode switch**:
+  it shows its noise pattern until your control word goes live and reverts
+  when you zero it. The *app-level* CRT mode (the `--crt` startup path:
+  pixel fonts, CRT layout, DDR writer) is unchanged and very much stays —
+  see section 3 for how it's coordinated now.
 - Two new modes exist when you're ready for them: **720x480i60** (mode 1) and
   **352x288p50 PAL** (mode 2). The core side is done; you opt in per-frame
   via the mode field.
@@ -87,7 +92,53 @@ Protocol rules:
    core extracts fields itself (reads source line `2*line + field`). No
    field splitting, no half-frame timing on the ARM side.
 
-## 3. Task 1 — Phase A (required): 352x240 writer + safe-area UI
+## 3. ARM-side coordination: who turns CRT mode on
+
+"CRT mode" remains a real mode of the *app*: it decides whether the launcher
+renders pixel fonts and CRT layout into the DDR writer (`--crt`) or runs the
+normal HDMI/scaler path. The Main_MiSTer fork already owns that decision and
+the mechanism survives v2 almost unchanged:
+
+- **Persisted state:** `config/zaparoo_launcher_crt.bin` (1-byte bool,
+  written via `FileSaveConfig`). Main reads it when the menu core loads
+  (`zaparoo_alt_launcher_init_for_menu()` in `support/zaparoo/alt_launcher.cpp`)
+  and spawns the frontend with or without `--crt`.
+- **Toggling:** the OSD "Zaparoo Frontend → Video" page calls
+  `alt_launcher_toggle_crt()`, which persists the new value, SIGTERMs the
+  frontend, and respawns it with the new flag. **No Main restart is needed**
+  — only the frontend process bounces. Keep this; a full Main re-exec is
+  strictly worse (slower, drops core state) and buys nothing.
+
+What v2 changes in Main (these are required Main-fork edits, same effort
+bucket as Task 1):
+
+1. `user_io_status_set("[9]", …)` everywhere in `alt_launcher.cpp` is now a
+   no-op — the new core has no CRT status bit. Delete the writes and the
+   500 ms re-assert timer. The frontend publishing word0/word1 *is* the
+   enable; Main's job shrinks to fb-mode setup, blanking, and spawning.
+2. The H/V offset status writes (`[13:10]`/`[17:14]`) are dead too. Offsets
+   move into DDR word1, which only the frontend writes. Remove the OSD
+   "H Offset"/"V Offset" entries in `launcher_pages.cpp` and the
+   `zaparoo_video_offsets.bin` handling; the launcher owns centering now
+   (section 7). Optional nicety: on first run, the launcher migrates the
+   two bytes from `config/zaparoo_video_offsets.bin` into its own config so
+   existing users keep their calibration.
+3. `set_native_crt_fb_mode()`: 320x240 stride 1280 → **352x240 stride 1408**.
+4. `blank_native_crt_fb()`: region size 0xA0000 → **0x300000**. Under v2,
+   zeroing the region isn't just ghost-clearing — a zeroed word0 means
+   "writer stopped", so the blank deterministically parks the core on its
+   noise pattern until the new frontend instance publishes.
+
+Open choice (pick during implementation): if the CRT toggle should also live
+in the launcher's own settings UI, don't have the launcher restart Main.
+Instead: launcher writes `zaparoo_launcher_crt.bin` itself and exits with a
+reserved exit code (e.g. 42 = "re-read CRT config and respawn me"); Main's
+`alt_launcher_poll()` exit handler treats that code as a respawn-with-reload
+instead of `return_to_normal_mode()`. That's a ~10-line Main change and
+reuses the existing respawn machinery. The OSD toggle can stay as a second
+entry point — both paths converge on the same persisted bool + respawn.
+
+## 4. Task 1 — Phase A (required): 352x240 writer + safe-area UI
 
 This is the must-ship piece; modes 1 and 2 are follow-ups.
 
@@ -98,14 +149,14 @@ This is the must-ship piece; modes 1 and 2 are follow-ups.
    buffers at `+0x1000` / `+0x180000`, mmap 0x300000.
 3. Write word1 on init: magic `0x5A50`, mode 0, offsets from launcher config
    (default 0/0). Clear both words on stop.
-4. UI safe-area pass (section 5).
-5. Calibration screen (section 6).
+4. UI safe-area pass (section 6).
+5. Calibration screen (section 7).
 
 Acceptance: on hardware with the new core, the launcher UI fills a CRT
 edge-to-edge; killing the launcher returns the noise pattern; a capture
 device reports 15.734 kHz / 240p.
 
-## 4. Tasks 2 & 3 — PAL and 480i (when ready)
+## 5. Tasks 2 & 3 — PAL and 480i (when ready)
 
 **PAL (mode 2):** add a "video standard: NTSC / PAL" user setting. PAL
 renders **352x288** and publishes mode 2. Note most PAL sets accept 60 Hz
@@ -114,9 +165,9 @@ mode 2 is for strict-50 Hz sets and correct-speed feel.
 
 **480i (mode 1):** add a 720x480 rendering path and (optionally) per-screen
 mode selection — e.g. main UI in 240p, text-heavy screens in 480i.
-Flicker discipline is mandatory (section 5, rule 4).
+Flicker discipline is mandatory (section 6, rule 4).
 
-## 5. UI rendering rules (apply to every mode)
+## 6. UI rendering rules (apply to every mode)
 
 These are not suggestions; geometry alone doesn't fix "every CRT crops
 differently":
@@ -138,9 +189,10 @@ differently":
    standard console-era 480i dashboard trick). Existing CRT typography rules
    in `native-core-poc.md` (integer snapping, bitmap fonts) stay in force.
 
-## 6. Calibration screen
+## 7. Calibration screen
 
-The launcher now owns centering (the OSD options are gone):
+The launcher now owns centering (the core's status bits are gone and Main's
+OSD offset entries go with them — see section 3, item 2):
 
 - Draw a border test pattern (240p-test-suite style: 1-px frame at the
   extreme edge, rectangles at the 90% and 80% safe areas, cross-hatch).
@@ -150,7 +202,7 @@ The launcher now owns centering (the OSD options are gone):
   zero — the standard timing is the centering mechanism, trims only
   compensate for miscentered sets.
 
-## 7. Verification checklist (frontend-visible items)
+## 8. Verification checklist (frontend-visible items)
 
 - Fill/centering on **2–3 different CRTs** plus a capture device (should
   report 15.734 kHz exactly; 480i should be detected as 480i, not 240p).
@@ -164,7 +216,7 @@ The launcher now owns centering (the OSD options are gone):
 - HDMI output still locks in every mode (the core's ascal path handles it;
   just confirm).
 
-## 8. Reference
+## 9. Reference
 
 - FPGA-side spec and rationale: `docs/native-video-plan.md` (Menu_MiSTer).
 - RTL that consumes this contract: `rtl/native_video_reader.sv` (the word1
