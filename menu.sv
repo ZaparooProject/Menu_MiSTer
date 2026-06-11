@@ -185,7 +185,9 @@ assign DDRAM_CLK = clk_sys;
 assign CE_PIXEL  = ce_pix;
 
 assign VGA_SL = 0;
-assign VGA_F1 = 0;
+// Field number for 480i: ascal (HDMI) keys deinterlacing off this, and the
+// analog csync path passes it through. 0 in the progressive modes.
+assign VGA_F1 = native_field;
 assign VIDEO_ARX = 0;
 assign VIDEO_ARY = 0;
 assign VGA_SCALER= 0;
@@ -207,14 +209,11 @@ wire [26:0] act_cnt2 = {~act_cnt[26],act_cnt[25:0]};
 assign LED_POWER[0]= FB ? led[2] : act_cnt2[26] ? act_cnt2[25:18] > act_cnt2[7:0] : act_cnt2[25:18] <= act_cnt2[7:0];
 
 
-`include "build_id.v" 
-// Image centering options use signed two's-complement ordering with 0 first,
-// so the power-on default (status bits = 0) selects the calibrated base timing.
+`include "build_id.v"
+// No video options here: native video mode and centering trims arrive via
+// the DDR control block written by the launcher (see rtl/native_video_reader.sv).
 localparam CONF_STR = {
 	"MENU;UART31250,MIDI;",
-	"-;",
-	"O[13:10],H Offset,0,+2,+4,+6,+8,+10,+12,+14,-16,-14,-12,-10,-8,-6,-4,-2;",
-	"O[17:14],V Offset,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"-;",
 	"V,v",`BUILD_DATE
 };
@@ -348,8 +347,9 @@ always @(posedge clk_sys) begin
 end
 
 // DDR clear loop removed: native_video_reader owns DDRAM_* signals.
-// When status[9]=0 the reader is held in idle (rd=0, we=0) and DDR is unused;
-// when status[9]=1 the reader takes over to fetch the linux-rendered framebuffer.
+// The reader polls the launcher's control block once per vblank; until the
+// launcher publishes frames it issues a single 64-bit read per frame and the
+// core shows the noise pattern.
 
 ////////////////////////////  MT32pi  ////////////////////////////////// 
 
@@ -460,27 +460,28 @@ end
 
 localparam lfsr_n = 63;
 
-wire PAL = status[4];
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
 
-// Pixel clock: CLK_VIDEO = 27.027 MHz; ce_pix /4 = ~6.756 MHz, which gives
-// an NTSC-spec 15.734 kHz line rate when fed into native_video_timing
-// (H_TOTAL=429). Both the cosine fallback and the FB reader use this ce_pix.
+// Pixel clock: CLK_VIDEO = 27.000 MHz (the universal SD video clock).
+// ce_pix /4 = 6.75 MHz gives exactly 15734.27 Hz (NTSC, 429-px line) and
+// 15625.00 Hz (PAL, 432-px line); the 480i mode runs /2 = 13.5 MHz with an
+// 858-px line for the same 15734.27 Hz. Both the cosine fallback and the FB
+// reader use this ce_pix.
+wire [1:0] native_mode;
 reg [1:0] ce_div;
 reg       ce_pix;
 always @(posedge CLK_VIDEO) begin
 	if (RESET) ce_div <= 2'd0;
 		else  ce_div <= ce_div + 2'd1;
-	ce_pix <= (ce_div == 2'd0);
+	ce_pix <= (native_mode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
 end
 
 // Native video timing + DDR reader. Timing outputs (sync, DE, vcount, frame
 // edge) are the SINGLE source of truth for VGA scanout in both modes — that's
-// what guarantees the CRT sees a clean 15.734 kHz line rate whether we're
-// painting cosine noise or reading a Linux-rendered framebuffer.
-wire mode_zaparoo = status[9];
-
+// what guarantees the CRT sees a clean 15 kHz line rate whether we're
+// painting cosine noise or reading a Linux-rendered framebuffer. Mode and
+// centering trims come from the launcher's DDR control block, not the OSD.
 wire [7:0] native_r;
 wire [7:0] native_g;
 wire [7:0] native_b;
@@ -489,6 +490,7 @@ wire       native_vs;
 wire       native_de;
 wire [8:0] native_vcount;
 wire       native_new_frame;
+wire       native_field;
 wire       native_active;
 
 native_video_top native_video
@@ -518,17 +520,13 @@ native_video_top native_video
 	.vga_vblank     (),
 	.vga_vcount     (native_vcount),
 	.vga_new_frame  (native_new_frame),
-	.enable         (mode_zaparoo),
-	.active         (native_active),
-
-	// H offset is a 4-bit signed OSD value doubled into 2-pixel steps.
-	// V offset is a normal 4-bit signed OSD value in 1-line steps.
-	.h_offset       ($signed({status[13:10], 1'b0})),
-	.v_offset       ($signed(status[17:14]))
+	.vga_mode       (native_mode),
+	.vga_field      (native_field),
+	.active         (native_active)
 );
 
-// Cosine + LFSR fallback noise pattern, painted into the 320x240 active area
-// of the shared native timing. vvc steps once per frame; the LFSR walks every
+// Cosine + LFSR fallback noise pattern, painted into the active area of the
+// shared native timing (352x240 when no launcher is publishing frames). vvc steps once per frame; the LFSR walks every
 // pixel; cos LUT is indexed by vvc + vcount so the pattern shifts vertically
 // over time. Outside the active area we drive black to keep sync clean.
 reg  [9:0] vvc;
@@ -550,11 +548,12 @@ cos cos(vvc + {native_vcount, 2'b00}, cos_out);
 
 wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
 
-// Mode A (default): cosine pattern paints into the native active area.
-// Mode B (status[9]=1, frame ready): DDR-read RGB replaces the cosine pattern.
+// Default: cosine pattern paints into the native active area. Once the
+// launcher publishes frames (valid control block, advancing counter), the
+// DDR-read RGB replaces the cosine pattern; it reverts when the writer stops.
 // Sync/DE come from the same native timing in both cases — the CRT sees one
-// continuous, NTSC-spec signal regardless of which RGB source is selected.
-wire use_native = mode_zaparoo & native_active;
+// continuous, broadcast-spec signal regardless of which RGB source is selected.
+wire use_native = native_active;
 
 assign VGA_DE  = native_de;
 assign VGA_HS  = native_hs;
