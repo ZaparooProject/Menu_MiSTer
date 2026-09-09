@@ -14,7 +14,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install RTL simulator
         run: |
@@ -31,7 +33,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install kernel build tools
         run: |
@@ -42,7 +46,7 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
 
       - name: Cache verified compiler archive
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: kernel/.build/ci/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
           key: scanout-gcc-102825ae56c9e00142d06f35d2bdd3299edb6060e84a275a25b095e66fd3fc2a
@@ -51,7 +55,7 @@ jobs:
         run: bash kernel/build-scanout.sh
 
       - name: Upload scanout module
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zaparoo-scanout-6.18.38-MiSTer
           path: kernel/scanout-slots/zaparoo_scanout.ko
@@ -61,7 +65,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Build with Quartus Lite
         run: |
@@ -78,7 +84,7 @@ jobs:
           python3 -B tb/check_timing.py output_files/menu.sta.rpt
 
       - name: Upload RBF
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: menu-rbf
           path: output_files/menu.rbf
