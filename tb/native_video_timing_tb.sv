@@ -1,4 +1,4 @@
-// Self-checking testbench for native_video_timing (docs/native-video-plan.md §8).
+// Self-checking testbench for rtl/native_video_timing.sv.
 //
 // Measures, in exact ce_pix ticks, per mode: line period, hsync width,
 // sync→active delay, active width, field period, vsync width, active lines
