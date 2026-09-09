@@ -9,6 +9,53 @@ permissions:
   contents: read
 
 jobs:
+  rtl-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install RTL simulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y iverilog
+
+      - name: Test timing-report gate
+        run: python3 -B -m unittest discover -s tb -p 'test_*.py'
+
+      - name: Run RTL regressions
+        run: sh tb/run.sh
+
+  scanout-module:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install kernel build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            libgmp-dev libmpc-dev libmpfr-dev kmod xz-utils git curl ca-certificates
+          rustup toolchain install 1.95.0 --profile minimal --no-self-update
+
+      - name: Cache verified compiler archive
+        uses: actions/cache@v4
+        with:
+          path: kernel/.build/ci/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
+          key: scanout-gcc-102825ae56c9e00142d06f35d2bdd3299edb6060e84a275a25b095e66fd3fc2a
+
+      - name: Build qualified kernel and module
+        run: bash kernel/build-scanout.sh
+
+      - name: Upload scanout module
+        uses: actions/upload-artifact@v4
+        with:
+          name: zaparoo-scanout-6.18.38-MiSTer
+          path: kernel/scanout-slots/zaparoo_scanout.ko
+          if-no-files-found: error
+
   build:
     runs-on: ubuntu-latest
 
@@ -24,8 +71,10 @@ jobs:
             theypsilon/quartus-lite-c5:17.0.2.docker0 \
             /opt/intelFPGA_lite/quartus/bin/quartus_sh --flow compile menu
 
-      - name: Check build output
-        run: test -f output_files/menu.rbf
+      - name: Check build output and timing
+        run: |
+          test -f output_files/menu.rbf
+          python3 -B tb/check_timing.py output_files/menu.sta.rpt
 
       - name: Upload RBF
         uses: actions/upload-artifact@v4
