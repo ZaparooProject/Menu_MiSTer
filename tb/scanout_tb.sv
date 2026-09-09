@@ -145,6 +145,28 @@ module scanout_tb;
         transfer(16'h4444, response); transfer(16'h2222, response);
         end_command();
         assert(active_base == 32'h22224444) else $fatal(1, "legacy framebuffer restore lost");
+        for (integer gap = 0; gap < 9; gap = gap + 1) begin
+            @(negedge clk); vblank = 0;
+            repeat (4) @(posedge clk);
+            post(0, 16'd10 + gap);
+            assert(pending) else $fatal(1, "gap probe must start with pending route");
+            begin_command(8'h2f, 0);
+            for (integer word = 0; word < 10; word = word + 1) begin
+                transfer(16'ha000 + word, response);
+                if (word == gap) begin
+                    @(negedge clk); vblank = 1;
+                    repeat (8) begin
+                        @(posedge clk); #1;
+                        assert(!pending && !accepted)
+                            else $fatal(1, "route applied in legacy gap %0d", gap);
+                    end
+                end
+            end
+            end_command();
+            assert(active_base == 32'ha002a001)
+                else $fatal(1, "legacy descriptor corrupted across gap %0d", gap);
+        end
+        $display("PASS: all nine inter-word legacy vblank gaps preserve takeover");
         $display("PASS: scanout CAPS, CRC, pending/receipts, 540p HDMI, vblank, legacy takeover");
         $finish;
     end
