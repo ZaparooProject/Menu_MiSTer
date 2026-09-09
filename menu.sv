@@ -327,13 +327,13 @@ wire [2:0] led = status[8:6];
 // 858-px line for the same 15734.27 Hz. Both the cosine fallback and the FB
 // reader use this ce_pix.
 wire [1:0] native_mode;
-reg [1:0] ce_div;
-reg       ce_pix;
-always @(posedge CLK_VIDEO) begin
-	if (RESET | ~vid_locked) ce_div <= 2'd0;
-		else  ce_div <= ce_div + 2'd1;
-	ce_pix <= (native_mode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
-end
+wire ce_pix;
+zaparoo_pixel_enable pixel_enable (
+	.clk(CLK_VIDEO),
+	.reset(RESET | ~vid_locked),
+	.mode(native_mode),
+	.ce_pix(ce_pix)
+);
 
 // Native video timing + DDR reader. Timing outputs (sync, DE, vcount, frame
 // edge) are the SINGLE source of truth for VGA scanout in both modes — that's

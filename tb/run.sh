@@ -19,6 +19,8 @@ run_test bootstrap_video_tb \
 
 run_test snow_phase_tb ../rtl/zaparoo_snow_phase.sv snow_phase_tb.sv
 
+run_test pixel_enable_tb ../rtl/zaparoo_pixel_enable.sv pixel_enable_tb.sv
+
 run_test scanout_tb \
 	../sys/mister_magik_vblank_latch.sv ../sys/mister_magik_latch_sys_top_bridge.sv \
 	scanout_tb.sv
