@@ -1,0 +1,134 @@
+/* Upstream: https://github.com/NigelBreslaw/MiSTer-MagiK
+ * Revision d70c141fd25996459867dce341070a0a81a9683d,
+ * mister/platform/fpga/menu-vblank-latch/mister_magik_latch_protocol.svh.
+ * Includes 1080p limits/CRC from local Zaparoo demo Menu_MiSTer snapshot
+ * 8ab57fdf153dd2fad733aa9691942c88e23c02ef.
+ * No local generator; keep constants aligned with the paired frontend. */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Nigel Breslaw */
+
+localparam [7:0]  MAGIK_UIO_SET_FBUF_LATCH = 8'h57;
+localparam [7:0]  MAGIK_UIO_GET_FBUF_LATCH = 8'h58;
+localparam [7:0]  MAGIK_UIO_GET_FBUF_LATCH_CAPS = 8'h59;
+localparam [7:0]  MAGIK_UIO_GET_FBUF_LATCH_DIAGNOSTICS = 8'h5A;
+localparam [7:0]  MAGIK_UIO_GET_FBUF_LATCH_RECEIPT = 8'h5B;
+localparam [15:0] MAGIK_FBUF_LATCH_MAGIC = 16'h4D47;
+localparam [15:0] MAGIK_FBUF_STATUS_MAGIC = 16'h4D48;
+localparam [15:0] MAGIK_FBUF_CAPS_MAGIC = 16'h4D49;
+localparam [15:0] MAGIK_FBUF_DIAGNOSTICS_MAGIC = 16'h4D4A;
+localparam [15:0] MAGIK_FBUF_RECEIPT_MAGIC = 16'h4D4B;
+localparam [15:0] MAGIK_FBUF_PROTOCOL_VERSION = 16'd4;
+localparam [15:0] MAGIK_FBUF_PROTOCOL_V4 = 16'd4;
+localparam [15:0] MAGIK_FBUF_CAPS_FLAGS = 16'h01FF;
+// Zaparoo fork extension: native 1080p RGB565 limits (paired with the
+// enlarged scanout-slots module in kernel/scanout-slots/).
+localparam [15:0] MAGIK_FBUF_MAX_WIDTH = 16'd1920;
+localparam [15:0] MAGIK_FBUF_MAX_HEIGHT = 16'd1080;
+localparam [15:0] MAGIK_FBUF_MAX_STRIDE = 16'd3840;
+localparam [4:0]  MAGIK_FBUF_V4_CAPS_WORDS = 5'd6;
+localparam [4:0]  MAGIK_FBUF_V4_SET_PAYLOAD_WORDS = 5'd11;
+localparam [4:0]  MAGIK_FBUF_V4_SET_WORDS = 5'd12;
+localparam [4:0]  MAGIK_FBUF_V4_STATUS_WORDS = 5'd16;
+localparam [4:0]  MAGIK_FBUF_V4_DIAGNOSTICS_WORDS = 5'd7;
+localparam [4:0]  MAGIK_FBUF_V4_RECEIPT_WORDS = 5'd11;
+
+localparam [15:0] MAGIK_RECEIPT_NONE = 16'd0;
+localparam [15:0] MAGIK_RECEIPT_ACCEPTED = 16'd1;
+localparam [15:0] MAGIK_RECEIPT_REJECTED = 16'd2;
+
+localparam [15:0] MAGIK_CAP_RGB565 = 16'h0001;
+localparam [15:0] MAGIK_CAP_DOUBLE_BUFFER = 16'h0002;
+localparam [15:0] MAGIK_CAP_VARIABLE_GEOMETRY = 16'h0004;
+localparam [15:0] MAGIK_CAP_TRANSACTIONAL_POST = 16'h0008;
+localparam [15:0] MAGIK_CAP_COHERENT_STATUS = 16'h0010;
+localparam [15:0] MAGIK_CAP_STATUS_CRC = 16'h0020;
+localparam [15:0] MAGIK_CAP_POST_CRC = 16'h0040;
+localparam [15:0] MAGIK_CAP_REJECTION_CONTEXT = 16'h0080;
+localparam [15:0] MAGIK_CAP_AUTHORITATIVE_RECEIPT = 16'h0100;
+
+localparam integer MAGIK_STATUS_ACTIVE_ENABLED = 0;
+localparam integer MAGIK_STATUS_PENDING_ENABLED = 1;
+localparam integer MAGIK_STATUS_PENDING = 2;
+localparam integer MAGIK_STATUS_MAGIK_OWNERSHIP = 3;
+localparam integer MAGIK_STATUS_REJECT_REASON_SHIFT = 4;
+localparam integer MAGIK_STATUS_REJECT_REASON_WIDTH = 4;
+
+localparam [3:0] MAGIK_REJECT_NONE = 4'd0;
+localparam [3:0] MAGIK_REJECT_MISSING_WORD = 4'd1;
+localparam [3:0] MAGIK_REJECT_DUPLICATE_WORD = 4'd2;
+localparam [3:0] MAGIK_REJECT_OUT_OF_ORDER = 4'd3;
+localparam [3:0] MAGIK_REJECT_POST_CLOSE = 4'd4;
+localparam [3:0] MAGIK_REJECT_BAD_CRC = 4'd5;
+localparam [3:0] MAGIK_REJECT_INVALID_MODE = 4'd6;
+localparam [3:0] MAGIK_REJECT_INVALID_BASE = 4'd7;
+localparam [3:0] MAGIK_REJECT_INVALID_GEOMETRY = 4'd8;
+localparam [3:0] MAGIK_REJECT_INVALID_STRIDE = 4'd9;
+localparam [3:0] MAGIK_REJECT_INVALID_BOUNDS = 4'd10;
+localparam [3:0] MAGIK_REJECT_ADDRESS_WRAP = 4'd11;
+localparam [3:0] MAGIK_REJECT_RESTARTED = 4'd12;
+localparam [3:0] MAGIK_REJECT_SHIFTED_WORD = 4'd13;
+localparam [3:0] MAGIK_REJECT_PENDING_BUSY = 4'd14;
+localparam [3:0] MAGIK_REJECT_RESERVED = 4'd15;
+
+localparam [15:0] MAGIK_CRC_POLYNOMIAL = 16'h1021;
+localparam [15:0] MAGIK_CRC_INITIAL = 16'hFFFF;
+localparam [15:0] MAGIK_CRC_FINAL_XOR = 16'h0000;
+
+// Caps golden updated for the Zaparoo 1080p limit extension:
+// payload [4, 0x1FF, 1920, 1080, 3840], CRC-16/CCITT-FALSE 0x2984.
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_0 = 16'h0004;
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_1 = 16'h01FF;
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_2 = 16'h0780;
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_3 = 16'h0438;
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_4 = 16'h0F00;
+localparam [15:0] MAGIK_GOLDEN_CAPS_V4_CRC = 16'h2984;
+
+localparam [15:0] MAGIK_GOLDEN_SET_V4_0 = 16'h8014;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_1 = 16'h9000;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_2 = 16'h227E;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_3 = 16'h03C0;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_4 = 16'h021C;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_5 = 16'h0000;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_6 = 16'h03BF;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_7 = 16'h0000;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_8 = 16'h021B;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_9 = 16'h0780;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_10 = 16'h002B;
+localparam [15:0] MAGIK_GOLDEN_SET_V4_CRC = 16'h56F5;
+
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_0 = 16'h002A;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_1 = 16'h002B;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_2 = 16'h000F;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_3 = 16'h0003;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_4 = 16'h0004;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_5 = 16'h9000;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_6 = 16'h227E;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_7 = 16'h03C0;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_8 = 16'h021C;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_9 = 16'h0780;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_10 = 16'h0007;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_11 = 16'h0009;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_12 = 16'h0064;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_13 = 16'h0065;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_14 = 16'h0065;
+localparam [15:0] MAGIK_GOLDEN_STATUS_V4_CRC = 16'h917A;
+
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_0 = 16'h0007;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_1 = 16'h0001;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_2 = 16'h000B;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_3 = 16'h0000;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_4 = 16'h0058;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_5 = 16'h0000;
+localparam [15:0] MAGIK_GOLDEN_DIAGNOSTICS_V4_CRC = 16'hEF7D;
+
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_0 = 16'h0065;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_1 = 16'h002B;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_2 = 16'h0001;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_3 = 16'h0065;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_4 = 16'h002B;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_5 = 16'h0065;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_6 = 16'h002B;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_7 = 16'h0064;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_8 = 16'h002A;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_9 = 16'h0000;
+localparam [15:0] MAGIK_GOLDEN_RECEIPT_V4_CRC = 16'h5881;

@@ -469,8 +469,6 @@ end
 
 /////////////////////   VIDEO   ///////////////////
 
-localparam lfsr_n = 63;
-
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
 
@@ -499,8 +497,6 @@ wire [7:0] native_b;
 wire       native_hs;
 wire       native_vs;
 wire       native_de;
-wire [8:0] native_vcount;
-wire       native_new_frame;
 wire       native_field;
 wire       native_active;
 
@@ -529,48 +525,21 @@ native_video_top native_video
 	.vga_de         (native_de),
 	.vga_hblank     (),
 	.vga_vblank     (),
-	.vga_vcount     (native_vcount),
-	.vga_new_frame  (native_new_frame),
+	.vga_vcount     (),
+	.vga_new_frame  (),
 	.vga_mode       (native_mode),
 	.vga_field      (native_field),
 	.active         (native_active)
 );
 
-// Cosine + LFSR fallback noise pattern, painted into the active area of the
-// shared native timing (352x240 when no launcher is publishing frames). vvc steps once per frame; the LFSR walks every
-// pixel; cos LUT is indexed by vvc + vcount so the pattern shifts vertically
-// over time. Outside the active area we drive black to keep sync clean.
-reg  [9:0] vvc;
-reg  [lfsr_n:0] rnd_reg;
-wire [lfsr_n:0] rnd;
-wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_reg[2]};
-
-lfsr #(lfsr_n) random(rnd);
-
-always @(posedge CLK_VIDEO) begin
-	if (RESET) vvc <= 10'd0;
-		else if (native_new_frame) vvc <= vvc + 10'd6;
-	if (ce_pix) rnd_reg <= rnd;
-end
-
-reg  [7:0] cos_out;
-wire [5:0] cos_g = cos_out[7:3] + 6'd32;
-cos cos(vvc + {native_vcount, 2'b00}, cos_out);
-
-wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
-
-// Default: cosine pattern paints into the native active area. Once the
-// launcher publishes frames (valid control block, advancing counter), the
-// DDR-read RGB replaces the cosine pattern; it reverts when the writer stops.
-// Sync/DE come from the same native timing in both cases — the CRT sees one
-// continuous, broadcast-spec signal regardless of which RGB source is selected.
-wire use_native = native_active;
-
-assign VGA_DE  = native_de;
-assign VGA_HS  = native_hs;
-assign VGA_VS  = native_vs;
-assign VGA_R   = use_native ? native_r : (native_de ? comp_v : 8'd0);
-assign VGA_G   = use_native ? native_g : (native_de ? comp_v : 8'd0);
-assign VGA_B   = use_native ? native_b : (native_de ? comp_v : 8'd0);
+// Black idle source keeps timing and downstream OSD alive until either the
+// HDMI latch or the native CRT writer supplies a frame.
+zaparoo_bootstrap_video bootstrap_video (
+	.native_active(native_active),
+	.native_rgb({native_r, native_g, native_b}),
+	.de_in(native_de), .hs_in(native_hs), .vs_in(native_vs),
+	.rgb_out({VGA_R, VGA_G, VGA_B}),
+	.de_out(VGA_DE), .hs_out(VGA_HS), .vs_out(VGA_VS)
+);
 
 endmodule

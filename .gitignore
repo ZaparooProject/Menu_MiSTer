@@ -37,3 +37,15 @@ c5_pin_model_dump.txt
 *.xml
 *_netlist
 *.cdf
+/kernel/.build/
+/kernel/**/*.o
+/kernel/**/*.ko
+/kernel/**/*.mod
+/kernel/**/*.mod.c
+/kernel/**/.*.cmd
+/kernel/**/Module.symvers
+/kernel/**/modules.order
+/kernel/**/.tmp_versions/
+/test-output/
+.pi/
+.claude/
