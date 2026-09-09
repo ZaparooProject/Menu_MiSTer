@@ -16,7 +16,7 @@
 #include <linux/of.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
-#include <generated/utsrelease.h>
+#include <linux/utsname.h>
 #include "zaparoo_scanout_platform.h"
 #include "zaparoo_scanout_uapi.h"
 
@@ -54,7 +54,7 @@ static int validate_platform(void)
 	const __be32 *cells;
 	int len, ret = -ENODEV;
 
-	if (strcmp(UTS_RELEASE, ZAPAROO_SCANOUT_KERNEL_RELEASE) ||
+	if (strcmp(utsname()->release, ZAPAROO_SCANOUT_KERNEL_RELEASE) ||
 	    !of_machine_is_compatible(ZAPAROO_SCANOUT_MACHINE))
 		return -ENODEV;
 	cells = of_get_property(of_root, "#address-cells", &len);
