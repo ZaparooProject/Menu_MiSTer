@@ -106,7 +106,6 @@ native_video_reader reader
 	.new_frame      (tim_new_frame),
 	.new_line       (tim_new_line),
 	.field          (tim_field),
-	.hcount         (tim_hcount),
 
 	.mode_out       (rd_mode),
 	.h_offset_out   (rd_h_offset),

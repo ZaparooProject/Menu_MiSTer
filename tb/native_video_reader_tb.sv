@@ -6,8 +6,9 @@
 //     offsets parsed from word1 and latched by the timing module
 //   - double buffering: counter change switches buffer base
 //   - writer stop: word0 -> 0 drops active (frame_ready) again
-//   - legacy contract (no magic): 160-word lines from the legacy buffers,
-//     picture centered with 16-px black side bars
+//   - stale DDR: a magic-carrying block already present at reset with a
+//     frozen counter never activates (this is what a previous core leaves
+//     behind); a counter advance under it does activate; no magic never does
 //   - PAL (mode 2): 288 line fetches
 //   - 480i (mode 1): two 180-beat bursts per line, source line = 2*line+field,
 //     alternating per field; FIFO never overflows
@@ -37,8 +38,6 @@ end
 
 // ---- DDR model -------------------------------------------------------------
 localparam [28:0] CTRL_ADDR   = 29'h07400000;
-localparam [28:0] BUF0_LEGACY = 29'h07400020;
-localparam [28:0] BUF1_LEGACY = 29'h07409620;
 localparam [28:0] BUF0_V2     = 29'h07400200;
 localparam [28:0] BUF1_V2     = 29'h07430000;
 localparam [63:0] PIX_DATA    = 64'h00FFAA55_00FFAA55; // B,G,R,X = 55,AA,FF,00
@@ -217,7 +216,7 @@ initial begin
 	check("v2: v_offset latched",        dut.timing.v_offset, -3);
 	check_frame_fetch("v2-buf0", BUF0_V2, 176, 240, 176, 1, 0, fld_a);
 	sample_r(100, 100, rs); check("v2: interior pixel R",  rs, 8'hFF);
-	sample_r(6,   100, rs); check("v2: no left bar",       rs, 8'hFF);
+	sample_r(6,   100, rs); check("v2: paints to the edge", rs, 8'hFF);
 
 	// Phase 2: counter advances with buffer 1.
 	$display("--- phase 2: double buffer ---");
@@ -232,27 +231,39 @@ initial begin
 	check("stop: active drops",          {31'd0, active}, 0);
 	check("stop: mode reverts",          vmode, 0);
 
-	// Phase 4: legacy writer (no magic).
-	$display("--- phase 4: legacy contract ---");
-	publish(0, 4'd0, 8'sd0, 4'sd0, 3, 0);
+	// Phase 4: a block already present at reset is a previous core's DDR
+	// leftovers, not a writer, and must never be painted.
+	$display("--- phase 4: stale control block rejected ---");
+	publish(1, 4'd0, 8'sd0, 4'sd0, 9, 0);
+	reset = 1; repeat (20) @(posedge clk_sys); reset = 0;
+	wait_frames(8);
+	check("stale at reset: inactive",    {31'd0, active}, 0);
+	sample_r(100, 100, rs); check("stale at reset: idle not DDR", rs !== 8'hFF, 1);
+
+	// ...but a writer that then starts advancing the counter is real.
+	publish(1, 4'd0, 8'sd0, 4'sd0, 10, 1);
 	wait (active === 1'b1);
-	wait_frames(2);
-	check("legacy: offsets zero",        dut.timing.h_offset, 0);
-	check_frame_fetch("legacy", BUF0_LEGACY, 160, 240, 160, 1, 0, fld_a);
-	sample_r(6,   100, rs); check("legacy: left bar black",  rs, 8'h00);
-	sample_r(345, 100, rs); check("legacy: right bar black", rs, 8'h00);
-	sample_r(100, 100, rs); check("legacy: interior pixel",  rs, 8'hFF);
+	$display("pass  stale block: counter advance activates");
+
+	// No magic is rejected outright, however trusted the writer was.
+	publish(0, 4'd0, 8'sd0, 4'sd0, 11, 0);
+	wait_frames(4);
+	check("no magic: active drops",      {31'd0, active}, 0);
+	sample_r(100, 100, rs); check("no magic: idle not DDR", rs !== 8'hFF, 1);
+	ctrl_q = 64'd0;
+	wait_frames(3);
 
 	// Phase 5: PAL.
 	$display("--- phase 5: v2 mode 2 (PAL) ---");
-	publish(1, 4'd2, 8'sd0, 4'sd0, 4, 0);
+	publish(1, 4'd2, 8'sd0, 4'sd0, 12, 0);
 	wait (vmode === 2'd2);
+	wait (active === 1'b1);
 	wait_frames(2);
 	check_frame_fetch("pal", BUF0_V2, 176, 288, 176, 1, 0, fld_a);
 
 	// Phase 6: 480i.
 	$display("--- phase 6: v2 mode 1 (480i) ---");
-	publish(1, 4'd1, 8'sd0, 4'sd0, 5, 0);
+	publish(1, 4'd1, 8'sd0, 4'sd0, 13, 0);
 	wait (vmode === 2'd1);
 	wait_frames(2);
 	check_frame_fetch("480i-a", BUF0_V2, 360, 240, 180, 2, 1, fld_a);
@@ -262,7 +273,7 @@ initial begin
 
 	// Phase 7: DDR stops responding mid-session.
 	$display("--- phase 7: DDR timeout ---");
-	publish(1, 4'd0, 8'sd0, 4'sd0, 6, 0);
+	publish(1, 4'd0, 8'sd0, 4'sd0, 14, 0);
 	wait (vmode === 2'd0);
 	wait_frames(3);
 	check("pre-timeout: active",         {31'd0, active}, 1);
@@ -270,7 +281,7 @@ initial begin
 	wait (active === 1'b0);
 	$display("pass  timeout: active dropped");
 	respond_en = 1;
-	publish(1, 4'd0, 8'sd0, 4'sd0, 7, 0);
+	publish(1, 4'd0, 8'sd0, 4'sd0, 15, 0);
 	wait (active === 1'b1);
 	$display("pass  timeout: recovered after writer republish");
 

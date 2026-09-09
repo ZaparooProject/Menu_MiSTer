@@ -8,9 +8,15 @@
 //                  [3:0]   mode: 0 = 352x240p60, 1 = 720x480i60, 2 = 352x288p50
 //   0x3A001000: buffer 0   0x3A180000: buffer 1   (tight stride, width*4 B)
 //
-// Legacy contract (word1 magic absent): 320x240 buffers at 0x3A000100 /
-// 0x3A04B100; the picture is scanned centered in the 352-px active area
-// with 16-px black bars each side, offsets 0, mode 0.
+// The magic is mandatory, and a block is only painted once the writer has
+// been shown to be live. Nothing clears DDR on this core's startup, so a
+// previous core's leftovers sit at CTRL_ADDR looking like a control block;
+// without both checks the reader latches onto that and scans out garbage
+// instead of idle video, permanently. A writer proves itself either by
+// starting after the reader has seen no writer (word0 == 0 or no magic), or by
+// advancing the counter under a block that was already there at reset. Stale
+// DDR does neither. Note this is not a heartbeat: once trusted, a writer may
+// idle indefinitely without republishing.
 //
 // In 480i the app publishes one progressive 720x480 frame; this reader
 // fetches source line vcount*2 + field, so no field-splitting on the ARM
@@ -38,7 +44,6 @@ module native_video_reader
 	input  wire        new_frame,
 	input  wire        new_line,
 	input  wire        field,
-	input  wire  [9:0] hcount,
 
 	// Quasi-static, ddr_clk domain: caller synchronizes into the video
 	// domain; the timing module latches them at the field wrap.
@@ -57,16 +62,10 @@ assign ddr_be  = 8'hFF;
 assign ddr_we  = 1'b0;
 
 localparam [28:0] CTRL_ADDR   = 29'h07400000;
-localparam [28:0] BUF0_LEGACY = 29'h07400020;
-localparam [28:0] BUF1_LEGACY = 29'h07409620;
 localparam [28:0] BUF0_V2     = 29'h07400200;
 localparam [28:0] BUF1_V2     = 29'h07430000;
 localparam [15:0] MAGIC_V2    = 16'h5A50;
 localparam [19:0] TIMEOUT_MAX = 20'hF_FFFF;
-
-// Legacy 320-px picture centered in the 352-px active area.
-localparam [9:0] LEGACY_BAR_L = 10'd16;
-localparam [9:0] LEGACY_BAR_R = 10'd336;
 
 reg [1:0] new_frame_sync;
 always @(posedge ddr_clk) begin
@@ -114,14 +113,6 @@ end
 wire frame_ready_vid = frame_ready_sync[1];
 assign frame_ready = frame_ready_vid;
 
-reg legacy_mode;
-reg [1:0] legacy_sync;
-always @(posedge clk_vid) begin
-	if(reset_vid) legacy_sync <= 2'b0;
-		else legacy_sync <= {legacy_sync[0], legacy_mode};
-end
-wire legacy_vid = legacy_sync[1];
-
 localparam [3:0] ST_IDLE         = 4'd0;
 localparam [3:0] ST_POLL_CTRL    = 4'd1;
 localparam [3:0] ST_WAIT_CTRL    = 4'd2;
@@ -140,6 +131,11 @@ reg  [8:0]  cur_line;
 reg  [7:0]  beat_count;
 reg         burst_idx;
 reg         first_frame_loaded;
+// Gates frame_ready. Set when the reader observes no writer (so whatever
+// publishes next started while it was watching), and when the counter changes
+// under a block that was already present at reset. Never cleared afterwards:
+// an idle writer that stops republishing keeps its last frame on screen.
+reg         writer_trusted;
 reg         preloading;
 reg  [19:0] timeout_cnt;
 reg         fifo_wr;
@@ -174,18 +170,18 @@ always @(posedge ddr_clk) begin
 		ctrl_word          <= 32'd0;
 		ctrl_word1         <= 32'd0;
 		prev_frame_counter <= 30'd0;
-		buf_base_addr      <= BUF0_LEGACY;
+		buf_base_addr      <= BUF0_V2;
 		cur_line           <= 9'd0;
 		beat_count         <= 8'd0;
 		burst_idx          <= 1'b0;
 		first_frame_loaded <= 1'b0;
+		writer_trusted     <= 1'b0;
 		frame_ready_reg    <= 1'b0;
 		preloading         <= 1'b0;
 		timeout_cnt        <= 20'd0;
 		fifo_wr            <= 1'b0;
 		fifo_wr_data       <= 64'd0;
 		fifo_aclr_cnt      <= 4'd0;
-		legacy_mode        <= 1'b0;
 		mode_out           <= 2'd0;
 		h_offset_out       <= 8'sd0;
 		v_offset_out       <= 4'sd0;
@@ -239,37 +235,43 @@ always @(posedge ddr_clk) begin
 			end
 
 			ST_CHECK_CTRL: begin
-				if(ctrl_word == 32'd0) begin
-					// Writer stopped (or never started): revert to the noise
-					// pattern and forget the previous session.
+				if(ctrl_word == 32'd0 || !magic_ok) begin
+					// Writer stopped, never started, or this is not a control
+					// block at all: revert to idle video and forget the
+					// previous session.
 					frame_ready_reg    <= 1'b0;
 					first_frame_loaded <= 1'b0;
+					// Nothing is publishing right now, so the next block to
+					// appear started under observation and can be trusted.
+					writer_trusted     <= 1'b1;
 					prev_frame_counter <= 30'd0;
-					legacy_mode        <= 1'b0;
 					mode_out           <= 2'd0;
 					h_offset_out       <= 8'sd0;
 					v_offset_out       <= 4'sd0;
 					state              <= ST_IDLE;
 				end
 				else begin
-					legacy_mode  <= ~magic_ok;
-					mode_out     <= magic_ok ? ctrl_mode : 2'd0;
-					h_offset_out <= magic_ok ? $signed(ctrl_word1[15:8]) : 8'sd0;
-					v_offset_out <= magic_ok ? $signed(ctrl_word1[7:4]) : 4'sd0;
-					line_words   <= magic_ok ? ((ctrl_mode == 2'd1) ? 9'd360 : 9'd176) : 9'd160;
-					scan_lines   <= (magic_ok && ctrl_mode == 2'd2) ? 9'd288 : 9'd240;
-					scan_interlaced <= magic_ok && (ctrl_mode == 2'd1);
-					two_bursts   <= magic_ok && (ctrl_mode == 2'd1);
+					mode_out     <= ctrl_mode;
+					h_offset_out <= $signed(ctrl_word1[15:8]);
+					v_offset_out <= $signed(ctrl_word1[7:4]);
+					line_words   <= (ctrl_mode == 2'd1) ? 9'd360 : 9'd176;
+					scan_lines   <= (ctrl_mode == 2'd2) ? 9'd288 : 9'd240;
+					scan_interlaced <= (ctrl_mode == 2'd1);
+					two_bursts   <= (ctrl_mode == 2'd1);
 
 					if(ctrl_word[31:2] != prev_frame_counter) begin
 						prev_frame_counter <= ctrl_word[31:2];
-						buf_base_addr      <= ctrl_word[0] ? (magic_ok ? BUF1_V2 : BUF1_LEGACY)
-						                                   : (magic_ok ? BUF0_V2 : BUF0_LEGACY);
+						buf_base_addr      <= ctrl_word[0] ? BUF1_V2 : BUF0_V2;
 						cur_line           <= 9'd0;
 						burst_idx          <= 1'b0;
 						preloading         <= 1'b1;
 						fifo_aclr_cnt      <= 4'd8;
-						if(first_frame_loaded) frame_ready_reg <= 1'b1;
+						// A counter moving under a block we already fetched is
+						// a live writer even if it was there at reset.
+						if(first_frame_loaded) begin
+							writer_trusted  <= 1'b1;
+							frame_ready_reg <= 1'b1;
+						end
 						state              <= ST_READ_LINE;
 					end
 					else if(first_frame_loaded) begin
@@ -319,7 +321,7 @@ always @(posedge ddr_clk) begin
 				cur_line <= cur_line + 9'd1;
 				if(cur_line == scan_lines - 9'd1) begin
 					first_frame_loaded <= 1'b1;
-					frame_ready_reg    <= 1'b1;
+					frame_ready_reg    <= writer_trusted;
 					preloading         <= 1'b0;
 					state              <= ST_IDLE;
 				end
@@ -383,10 +385,6 @@ reg        pixel_word_valid;
 wire [31:0] pixel_low  = pixel_word[31:0];
 wire [31:0] pixel_high_word = pixel_word[63:32];
 
-// Legacy frames are 320 px wide inside the 352-px active area: black bars
-// for the first/last 16 px, FIFO pixels in between.
-wire fetch_active = de && (!legacy_vid || (hcount >= LEGACY_BAR_L && hcount < LEGACY_BAR_R));
-
 task automatic output_pixel;
 	input [31:0] pixel;
 	begin
@@ -412,7 +410,7 @@ always @(posedge clk_vid) begin
 		fifo_rd <= 1'b0;
 
 		if(ce_pix) begin
-			if(fetch_active && frame_ready_vid) begin
+			if(de && frame_ready_vid) begin
 				if(pixel_word_valid) begin
 					if(pixel_high) begin
 						output_pixel(pixel_high_word);
@@ -438,7 +436,6 @@ always @(posedge clk_vid) begin
 				end
 			end
 			else if(de) begin
-				// Legacy side bars: keep the partially consumed word.
 				r_out <= 8'd0;
 				g_out <= 8'd0;
 				b_out <= 8'd0;
