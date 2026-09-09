@@ -11,3 +11,4 @@ set_global_assignment -name SYSTEMVERILOG_FILE sys/mister_magik_vblank_latch.sv
 set_global_assignment -name SYSTEMVERILOG_FILE sys/mister_magik_latch_sys_top_bridge.sv
 set_global_assignment -name SYSTEMVERILOG_FILE sys/mister_magik_bootstrap_black.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/zaparoo_bootstrap_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/zaparoo_snow_phase.sv

@@ -497,6 +497,8 @@ wire [7:0] native_b;
 wire       native_hs;
 wire       native_vs;
 wire       native_de;
+wire [8:0] native_vcount;
+wire       native_new_frame;
 wire       native_field;
 wire       native_active;
 
@@ -525,18 +527,53 @@ native_video_top native_video
 	.vga_de         (native_de),
 	.vga_hblank     (),
 	.vga_vblank     (),
-	.vga_vcount     (),
-	.vga_new_frame  (),
+	.vga_vcount     (native_vcount),
+	.vga_new_frame  (native_new_frame),
 	.vga_mode       (native_mode),
 	.vga_field      (native_field),
 	.active         (native_active)
 );
 
-// Black idle source keeps timing and downstream OSD alive until either the
-// HDMI latch or the native CRT writer supplies a frame.
+// Keep upstream's asynchronous noise source and grayscale weighting. Only
+// the frame-phase enable differs: native timing stretches new_frame over
+// several video clocks, so it must be sampled on ce_pix, not every clock.
+wire [62:0] snow_random;
+reg [2:0] snow_sample = 0;
+wire [9:0] snow_phase;
+wire [7:0] snow_cos;
+wire [5:0] snow_level = {1'b0, snow_cos[7:3]} + 6'd32;
+wire [5:0] snow_noise = {snow_sample[0], snow_sample[1], {4{snow_sample[2]}}};
+wire [7:0] snow_pixel = (snow_level >= snow_noise) ?
+	{snow_level - snow_noise, 2'b00} : 8'd0;
+
+lfsr #(.N(63)) snow_source(snow_random);
+cos snow_wave(snow_phase, snow_cos);
+zaparoo_snow_phase snow_motion (
+	.clk(CLK_VIDEO), .reset(RESET | ~vid_locked), .ce_pix(ce_pix),
+	.new_frame(native_new_frame), .vcount(native_vcount), .phase(snow_phase)
+);
+
+// OSD status comes from the HDMI domain. Main disables OSD before handing
+// video to the frontend, so startup stays black without a new bus command.
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+reg [1:0] snow_osd_sync = 0;
+always @(posedge CLK_VIDEO) begin
+	if (RESET | ~vid_locked) begin
+		snow_sample <= 0;
+		snow_osd_sync <= 0;
+	end else begin
+		if (ce_pix) snow_sample <= snow_random[2:0];
+		snow_osd_sync <= {snow_osd_sync[0], OSD_STATUS};
+	end
+end
+
+// Black handoff, snow behind stock OSD, or native frontend RGB. All three
+// share the same native sync/DE; no video-mode switch is needed.
 zaparoo_bootstrap_video bootstrap_video (
 	.native_active(native_active),
 	.native_rgb({native_r, native_g, native_b}),
+	.show_snow(snow_osd_sync[1]),
+	.snow_rgb({snow_pixel, snow_pixel, snow_pixel}),
 	.de_in(native_de), .hs_in(native_hs), .vs_in(native_vs),
 	.rgb_out({VGA_R, VGA_G, VGA_B}),
 	.de_out(VGA_DE), .hs_out(VGA_HS), .vs_out(VGA_VS)

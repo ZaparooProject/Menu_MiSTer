@@ -3,6 +3,8 @@
 module bootstrap_video_tb;
     reg native_active = 0;
     reg [23:0] native_rgb = 0;
+    reg show_snow = 0;
+    reg [23:0] snow_rgb = 24'habcdef;
     reg de_in = 0, hs_in = 0, vs_in = 0;
     wire [23:0] rgb_out;
     wire de_out, hs_out, vs_out;
@@ -26,7 +28,15 @@ module bootstrap_video_tb;
         end
         native_active = 0; #1;
         assert(rgb_out == 0) else $fatal(1, "writer stop did not restore black");
-        $display("PASS: idle black, native CRT passthrough, timing and writer stop");
+        show_snow = 1; de_in = 1; #1;
+        assert(rgb_out == snow_rgb) else $fatal(1, "OSD did not reveal snow");
+        de_in = 0; #1;
+        assert(rgb_out == 0) else $fatal(1, "snow painted outside DE");
+        native_active = 1; #1;
+        assert(rgb_out == native_rgb) else $fatal(1, "snow covered native frontend");
+        native_active = 0; show_snow = 0; de_in = 1; #1;
+        assert(rgb_out == 0) else $fatal(1, "OSD close did not restore black");
+        $display("PASS: black handoff, OSD snow, native CRT priority and timing");
         $finish;
     end
 endmodule
