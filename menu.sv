@@ -33,7 +33,9 @@ assign DDRAM_CLK = clk_sys;
 assign CE_PIXEL  = ce_pix;
 
 assign VGA_SL = 0;
-assign VGA_F1 = 0;
+// Field number for 480i: ascal (HDMI) keys deinterlacing off this, and the
+// analog csync path passes it through. 0 in the progressive modes.
+assign VGA_F1 = native_field;
 assign VIDEO_ARX = 0;
 assign VIDEO_ARY = 0;
 assign VGA_SCALER= 0;
@@ -56,11 +58,13 @@ wire [26:0] act_cnt2 = {~act_cnt[26],act_cnt[25:0]};
 assign LED_POWER[0]= FB ? led[2] : act_cnt2[26] ? act_cnt2[25:18] > act_cnt2[7:0] : act_cnt2[25:18] <= act_cnt2[7:0];
 
 
-`include "build_id.v" 
+`include "build_id.v"
+// No video options here: native video mode and centering trims arrive via
+// the DDR control block written by the launcher (see rtl/native_video_reader.sv).
 localparam CONF_STR = {
 	"MENU;UART31250,MIDI;",
 	"-  ;",
-	"V,v",`BUILD_DATE 
+	"V,v",`BUILD_DATE
 };
 
 wire forced_scandoubler;
@@ -82,8 +86,19 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(clk_sys),
-	.outclk_1(CLK_VIDEO),
+	.outclk_1(),         // stock 27.027 MHz output, unused (see pll_video)
 	.locked(locked)
+);
+
+// Exact 27.000000 MHz video clock from its own PLL: 27 MHz can't share a
+// VCO with the 100 MHz clk_sys (lcm = 2700 MHz, above the VCO ceiling).
+wire vid_locked;
+pll_video pll_video
+(
+	.refclk(CLK_50M),
+	.rst(0),
+	.outclk_0(CLK_VIDEO),
+	.locked(vid_locked)
 );
 
 
@@ -185,36 +200,16 @@ always @(posedge clk_sys) begin
 					state      <= state+1'd1;
 				end
 			16: begin
-					sdram_addr <= addr[24:0];
-					sdram_din  <= 0;
-					sdram_we   <= we;
+					sdram_we <= 0;
 				end
 		endcase
 	end
 end
 
-ddram ddr
-(
-	.*,
-	.reset(RESET),
-   .dout(),
-   .din(0),
-   .rd(0),
-   .ready()
-);
-
-reg        we;
-reg [28:0] addr = 0;
-
-always @(posedge clk_sys) begin
-	reg [4:0] cnt = 9;
-
-	if(~RESET & cfg[15]) begin
-		cnt <= cnt + 1'b1;
-		we <= &cnt;
-		if(cnt == 8) addr <= addr + 1'd1;
-	end
-end
+// DDR clear loop removed: native_video_reader owns DDRAM_* signals.
+// The reader polls the launcher's control block once per vblank; until the
+// launcher publishes frames it issues a single 64-bit read per frame and the
+// core shows the noise pattern.
 
 ////////////////////////////  MT32pi  ////////////////////////////////// 
 
@@ -323,87 +318,114 @@ end
 
 /////////////////////   VIDEO   ///////////////////
 
-localparam lfsr_n = 63;
-
-wire PAL = status[4];
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
 
-reg   [9:0] hc;
-reg   [9:0] vc;
-reg   [9:0] vvc;
+// Pixel clock: CLK_VIDEO = 27.000 MHz (the universal SD video clock).
+// ce_pix /4 = 6.75 MHz gives exactly 15734.27 Hz (NTSC, 429-px line) and
+// 15625.00 Hz (PAL, 432-px line); the 480i mode runs /2 = 13.5 MHz with an
+// 858-px line for the same 15734.27 Hz. Both the cosine fallback and the FB
+// reader use this ce_pix.
+wire [1:0] native_mode;
+wire ce_pix;
+zaparoo_pixel_enable pixel_enable (
+	.clk(CLK_VIDEO),
+	.reset(RESET | ~vid_locked),
+	.mode(native_mode),
+	.ce_pix(ce_pix)
+);
 
-reg  [lfsr_n:0] rnd_reg;
-wire [lfsr_n:0] rnd;
+// Native video timing + DDR reader. Timing outputs (sync, DE, vcount, frame
+// edge) are the SINGLE source of truth for VGA scanout in both modes — that's
+// what guarantees the CRT sees a clean 15 kHz line rate whether we're
+// painting cosine noise or reading a Linux-rendered framebuffer. Mode and
+// centering trims come from the launcher's DDR control block, not the OSD.
+wire [7:0] native_r;
+wire [7:0] native_g;
+wire [7:0] native_b;
+wire       native_hs;
+wire       native_vs;
+wire       native_de;
+wire [8:0] native_vcount;
+wire       native_new_frame;
+wire       native_field;
+wire       native_active;
 
-wire  [5:0] rnd_c = {rnd_reg[0],rnd_reg[1],rnd_reg[2],rnd_reg[2],rnd_reg[2],rnd_reg[2]};
+native_video_top native_video
+(
+	.clk_sys        (clk_sys),
+	.clk_vid        (CLK_VIDEO),
+	.ce_pix         (ce_pix),
+	.reset          (RESET | ~vid_locked),
 
-lfsr #(lfsr_n) random(rnd);
+	.ddr_busy       (DDRAM_BUSY),
+	.ddr_burstcnt   (DDRAM_BURSTCNT),
+	.ddr_addr       (DDRAM_ADDR),
+	.ddr_dout       (DDRAM_DOUT),
+	.ddr_dout_ready (DDRAM_DOUT_READY),
+	.ddr_rd         (DDRAM_RD),
+	.ddr_din        (DDRAM_DIN),
+	.ddr_be         (DDRAM_BE),
+	.ddr_we         (DDRAM_WE),
 
+	.vga_r          (native_r),
+	.vga_g          (native_g),
+	.vga_b          (native_b),
+	.vga_hs         (native_hs),
+	.vga_vs         (native_vs),
+	.vga_de         (native_de),
+	.vga_hblank     (),
+	.vga_vblank     (),
+	.vga_vcount     (native_vcount),
+	.vga_new_frame  (native_new_frame),
+	.vga_mode       (native_mode),
+	.vga_field      (native_field),
+	.active         (native_active)
+);
+
+// Keep upstream's asynchronous noise source and grayscale weighting. Only
+// the frame-phase enable differs: native timing stretches new_frame over
+// several video clocks, so it must be sampled on ce_pix, not every clock.
+wire [62:0] snow_random;
+reg [2:0] snow_sample = 0;
+wire [9:0] snow_phase;
+wire [7:0] snow_cos;
+wire [5:0] snow_level = {1'b0, snow_cos[7:3]} + 6'd32;
+wire [5:0] snow_noise = {snow_sample[0], snow_sample[1], {4{snow_sample[2]}}};
+wire [7:0] snow_pixel = (snow_level >= snow_noise) ?
+	{snow_level - snow_noise, 2'b00} : 8'd0;
+
+lfsr #(.N(63)) snow_source(snow_random);
+cos snow_wave(snow_phase, snow_cos);
+zaparoo_snow_phase snow_motion (
+	.clk(CLK_VIDEO), .reset(RESET | ~vid_locked), .ce_pix(ce_pix),
+	.new_frame(native_new_frame), .vcount(native_vcount), .phase(snow_phase)
+);
+
+// OSD status comes from the HDMI domain. Main disables OSD before handing
+// video to the frontend, so startup stays black without a new bus command.
+(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
+reg [1:0] snow_osd_sync = 0;
 always @(posedge CLK_VIDEO) begin
-	if(forced_scandoubler) ce_pix <= 1;
-		else ce_pix <= ~ce_pix;
-
-	if(ce_pix) begin
-		if(hc == 637) begin
-			hc <= 0;
-			if(vc == (PAL ? (forced_scandoubler ? 623 : 311) : (forced_scandoubler ? 523 : 261))) begin 
-				vc <= 0;
-				vvc <= vvc + 9'd6;
-			end else begin
-				vc <= vc + 1'd1;
-			end
-		end else begin
-			hc <= hc + 1'd1;
-		end
-
-		rnd_reg <= rnd;
+	if (RESET | ~vid_locked) begin
+		snow_sample <= 0;
+		snow_osd_sync <= 0;
+	end else begin
+		if (ce_pix) snow_sample <= snow_random[2:0];
+		snow_osd_sync <= {snow_osd_sync[0], OSD_STATUS};
 	end
 end
 
-reg HBlank;
-reg HSync;
-reg VBlank;
-reg VSync;
-
-reg ce_pix;
-always @(posedge CLK_VIDEO) begin
-	if (hc == 529) HBlank <= 1;
-		else if (hc == 0) HBlank <= 0;
-
-	if (hc == 544) begin
-		HSync <= 1;
-
-		if(PAL) begin
-			if(vc == (forced_scandoubler ? 609 : 304)) VSync <= 1;
-				else if (vc == (forced_scandoubler ? 617 : 308)) VSync <= 0;
-
-			if(vc == (forced_scandoubler ? 601 : 300)) VBlank <= 1;
-				else if (vc == 0) VBlank <= 0;
-		end
-		else begin
-			if(vc == (forced_scandoubler ? 490 : 245)) VSync <= 1;
-				else if (vc == (forced_scandoubler ? 496 : 248)) VSync <= 0;
-
-			if(vc == (forced_scandoubler ? 480 : 240)) VBlank <= 1;
-				else if (vc == 0) VBlank <= 0;
-		end
-	end
-	
-	if (hc == 590) HSync <= 0;
-end
-
-reg  [7:0] cos_out;
-wire [5:0] cos_g = cos_out[7:3]+6'd32;
-cos cos(vvc + {vc>>forced_scandoubler, 2'b00}, cos_out);
-
-wire [7:0] comp_v = (cos_g >= rnd_c) ? {cos_g - rnd_c, 2'b00} : 8'd0;
-
-assign VGA_DE  = ~(HBlank | VBlank);
-assign VGA_HS  = HSync;
-assign VGA_VS  = VSync;
-assign VGA_G   = comp_v;
-assign VGA_R   = comp_v;
-assign VGA_B   = comp_v;
+// Black handoff, snow behind stock OSD, or native frontend RGB. All three
+// share the same native sync/DE; no video-mode switch is needed.
+zaparoo_bootstrap_video bootstrap_video (
+	.native_active(native_active),
+	.native_rgb({native_r, native_g, native_b}),
+	.show_snow(snow_osd_sync[1]),
+	.snow_rgb({snow_pixel, snow_pixel, snow_pixel}),
+	.de_in(native_de), .hs_in(native_hs), .vs_in(native_vs),
+	.rgb_out({VGA_R, VGA_G, VGA_B}),
+	.de_out(VGA_DE), .hs_out(VGA_HS), .vs_out(VGA_VS)
+);
 
 endmodule

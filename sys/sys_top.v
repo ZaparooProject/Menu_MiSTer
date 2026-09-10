@@ -231,7 +231,7 @@ end
 
 // gp_in[31] = 0 - quick flag that FPGA is initialized (HPS reads 1 when FPGA is not in user mode)
 //                 used to avoid lockups while JTAG loading
-wire [31:0] gp_in = {1'b0, btn_user | btn[1], btn_osd | btn[0], io_dig, 7'd0, ~HDMI_TX_INT, io_ver, io_ack, io_wide, io_dout | io_dout_sys};
+wire [31:0] gp_in = {1'b0, btn_user | btn[1], btn_osd | btn[0], io_dig, 7'd0, ~HDMI_TX_INT, io_ver, io_ack, io_wide, io_dout | io_dout_sys | magik_io_dout};
 wire [31:0] gp_out;
 
 wire  [1:0] io_ver = 1; // 0 - obsolete. 1 - optimized HPS I/O. 2,3 - reserved for future.
@@ -351,6 +351,73 @@ reg [12:0] arc2x = 0;
 reg [12:0] arc2y = 0;
 reg [15:0] io_dout_sys;
 
+// GPL-3.0-or-later latch adapter by Nigel Breslaw; see mister_magik_latch_sys_top_bridge.sv.
+wire        magik_response_valid;
+wire [15:0] magik_response_data;
+wire        magik_lfb_apply_accepted;
+wire        magik_lfb_en;
+wire        magik_lfb_flt;
+wire  [5:0] magik_lfb_fmt;
+wire [11:0] magik_lfb_width;
+wire [11:0] magik_lfb_height;
+wire [11:0] magik_lfb_hmin;
+wire [11:0] magik_lfb_hmax;
+wire [11:0] magik_lfb_vmin;
+wire [11:0] magik_lfb_vmax;
+wire [31:0] magik_lfb_base;
+wire [13:0] magik_lfb_stride;
+
+mister_magik_latch_sys_top_bridge magik_latch_bridge
+(
+	.clk_sys(clk_sys),
+	.hdmi_vbl(hdmi_vbl),
+	.io_uio(io_uio),
+	.io_strobe(io_strobe),
+	.io_din(io_din),
+	.active_lfb_en(LFB_EN),
+	.active_lfb_base(LFB_BASE),
+	.active_lfb_width(LFB_WIDTH),
+	.active_lfb_height(LFB_HEIGHT),
+	.active_lfb_stride(LFB_STRIDE),
+	.response_valid(magik_response_valid),
+	.response_data(magik_response_data),
+	.apply(),
+	.apply_accepted(magik_lfb_apply_accepted),
+	.legacy_write(),
+	.active_word_index(),
+	.route_en(magik_lfb_en),
+	.route_flt(magik_lfb_flt),
+	.route_fmt(magik_lfb_fmt),
+	.route_width(magik_lfb_width),
+	.route_height(magik_lfb_height),
+	.route_hmin(magik_lfb_hmin),
+	.route_hmax(magik_lfb_hmax),
+	.route_vmin(magik_lfb_vmin),
+	.route_vmax(magik_lfb_vmax),
+	.route_base(magik_lfb_base),
+	.route_stride(magik_lfb_stride),
+	.pending(),
+	.pending_seq(),
+	.active_seq(),
+	.post_count(),
+	.flip_count(),
+	.drop_count(),
+	.reject_count(),
+	.active_route_epoch()
+);
+
+// Independent response register avoids decoder assignments overwriting replies.
+// Diagnostic command 0x45 counts response strobes, including payload words.
+reg [15:0] magik_io_dout = 16'd0;
+reg  [7:0] magik_response_strobes = 8'd0;
+always @(posedge clk_sys) begin
+	if(~io_uio) magik_io_dout <= 16'd0;
+	else if(io_strobe) begin
+		magik_io_dout <= magik_response_valid ? magik_response_data : 16'd0;
+		if(magik_response_valid) magik_response_strobes <= magik_response_strobes + 1'd1;
+	end
+end
+
 always@(posedge clk_sys) begin
 	reg  [7:0] cmd;
 	reg        has_cmd;
@@ -359,6 +426,20 @@ always@(posedge clk_sys) begin
 	reg  [4:0] acx_att;
 	reg  [7:0] fb_crc;
 	reg  [1:0] sl_r;
+
+	if(magik_lfb_apply_accepted) begin
+		LFB_EN     <= magik_lfb_en;
+		LFB_FLT    <= magik_lfb_flt;
+		LFB_FMT    <= magik_lfb_fmt;
+		LFB_WIDTH  <= magik_lfb_width;
+		LFB_HEIGHT <= magik_lfb_height;
+		LFB_HMIN   <= magik_lfb_hmin;
+		LFB_HMAX   <= magik_lfb_hmax;
+		LFB_VMIN   <= magik_lfb_vmin;
+		LFB_VMAX   <= magik_lfb_vmax;
+		LFB_BASE   <= magik_lfb_base;
+		LFB_STRIDE <= magik_lfb_stride;
+	end
 
 	coef_wr <= 0;
 	sl_r <= FB_EN ? 2'b00 : scanlines;
@@ -408,6 +489,7 @@ always@(posedge clk_sys) begin
 `endif
 			if(io_din[7:0] == 'h42) io_dout_sys <= {1'b1, frame_cnt};
 			if(io_din[7:0] == 'h44) io_dout_sys <= 1;
+			if(io_din[7:0] == 'h45) io_dout_sys <= {8'h5A, magik_response_strobes};
 		end
 		else begin
 			cnt <= cnt + 1'd1;
