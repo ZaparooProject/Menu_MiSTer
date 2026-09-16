@@ -51,11 +51,11 @@ wire       tim_field;
 
 wire  [1:0] rd_mode;
 wire signed [7:0] rd_h_offset;
-wire signed [3:0] rd_v_offset;
+wire signed [5:0] rd_v_offset;
 
 reg [1:0] mode_sync     [1:0];
 reg [7:0] h_offset_sync [1:0];
-reg [3:0] v_offset_sync [1:0];
+reg [5:0] v_offset_sync [1:0];
 always @(posedge clk_vid) begin
 	mode_sync[0]     <= rd_mode;       mode_sync[1]     <= mode_sync[0];
 	h_offset_sync[0] <= rd_h_offset;   h_offset_sync[1] <= h_offset_sync[0];

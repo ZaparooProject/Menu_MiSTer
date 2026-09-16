@@ -20,7 +20,7 @@ reg reset = 1;
 
 reg        [1:0] mode_in     = 2'd0;
 reg signed [7:0] h_offset_in = 8'sd0;
-reg signed [3:0] v_offset_in = 4'sd0;
+reg signed [5:0] v_offset_in = 6'sd0;
 
 wire [1:0] mode;
 wire       field, hsync, vsync, hblank, vblank, de, new_frame, new_line;
@@ -192,19 +192,36 @@ initial begin
 	h_offset_in = -8'sd8;   settle(4);
 	check("h=-8  sync->active",         hs_to_de, 57);
 	h_offset_in = 8'sd100;  settle(4);
-	check("h=+100 clamps to +8",        hs_to_de, 73);
+	check("h=+100 clamps to +9",        hs_to_de, 74);
 	h_offset_in = -8'sd100; settle(4);
-	check("h=-100 clamps to -8",        hs_to_de, 57);
+	check("h=-100 clamps to -31",       hs_to_de, 34);
 	h_offset_in = 8'sd0;
 
-	v_offset_in = 4'sd2;    settle(4);
+	v_offset_in = 6'sd2;    settle(4);
 	check("v=+2  vsync->active",        vs_to_de, 429*21);
 	check("v=+2  field period",         vs_period, 429*262);
-	v_offset_in = -4'sd8;   settle(4);
+	v_offset_in = -6'sd8;   settle(4);
 	check("v=-8  vsync->active",        vs_to_de, 429*11);
-	v_offset_in = 4'sd7;    settle(4);
-	check("v=+7  clamps to +2",         vs_to_de, 429*21);
-	v_offset_in = 4'sd0;
+	v_offset_in = 6'sd31;   settle(4);
+	check("v=+31 clamps to +2",         vs_to_de, 429*21);
+	v_offset_in = -6'sd32;  settle(4);
+	check("v=-32 clamps to -14",        vs_to_de, 429*5);
+	check("v=-32 preserves period",     vs_period, 429*262);
+
+	// Extended negative trims must also preserve PAL and both 480i fields.
+	h_offset_in = -8'sd31;
+	mode_in = 2'd2; settle(4);
+	check("pal extended h",             hs_to_de, 38);
+	check("pal extended v",             vs_to_de, 432*7);
+	check("pal extended field",         vs_period, 432*312);
+	mode_in = 2'd1; settle(5);
+	check("480i extended h",            hs_to_de, 88);
+	check("480i extended field A",      vs_period, 225225);
+	check("480i extended field B",      vs_period_d, 225225);
+	check("480i extended active lines", de_lines_last, 240);
+	mode_in = 2'd0;
+	h_offset_in = 8'sd0;
+	v_offset_in = 6'sd0;
 
 	// ---- mode change sanity: back to NTSC after everything --------------
 	settle(4);
