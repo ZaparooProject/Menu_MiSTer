@@ -2,10 +2,10 @@
 //
 // DDR contract v2 (one 64-bit beat at 0x3A000000, read each vblank):
 //   word0 [31:0]:  (frame_counter << 2) | active_buffer; 0 = writer stopped
-//   word1 [63:32]: [31:16] magic 0x5A50 ("ZP")
-//                  [15:8]  h_offset, signed pixels (+ = right)
-//                  [7:4]   v_offset, signed lines  (+ = down)
-//                  [3:0]   mode: 0 = 352x240p60, 1 = 720x480i60, 2 = 352x288p50
+//   word1 [63:32]: [31:16] magic, [15:8] signed h_offset (+ = right)
+//   0x5A50 legacy: [7:4] signed v_offset, [3:0] mode
+//   0x5A51 extended: [7:2] signed v_offset, [1:0] mode
+//   mode: 0 = 352x240p60, 1 = 720x480i60, 2 = 352x288p50 (+v = down)
 //   0x3A001000: buffer 0   0x3A180000: buffer 1   (tight stride, width*4 B)
 //
 // The magic is mandatory, and a block is only painted once the writer has
@@ -49,7 +49,7 @@ module native_video_reader
 	// domain; the timing module latches them at the field wrap.
 	output reg   [1:0] mode_out,
 	output reg signed [7:0] h_offset_out,
-	output reg signed [3:0] v_offset_out,
+	output reg signed [5:0] v_offset_out,
 
 	output reg   [7:0] r_out,
 	output reg   [7:0] g_out,
@@ -149,8 +149,14 @@ reg  [8:0]  scan_lines;
 reg         scan_interlaced;
 reg         two_bursts;
 
-wire        magic_ok  = (ctrl_word1[31:16] == MAGIC_V2);
-wire [1:0]  ctrl_mode = (ctrl_word1[3:0] > 4'd2) ? 2'd0 : ctrl_word1[1:0];
+wire        extended = (ctrl_word1[31:16] == 16'h5A51);
+wire        magic_ok = extended || (ctrl_word1[31:16] == MAGIC_V2);
+wire [3:0]  raw_mode = extended ? {2'b00, ctrl_word1[1:0]} : ctrl_word1[3:0];
+wire [1:0]  ctrl_mode = (raw_mode > 4'd2) ? 2'd0 : raw_mode[1:0];
+wire signed [7:0] ctrl_h = $signed(ctrl_word1[15:8]);
+wire signed [3:0] legacy_v = $signed(ctrl_word1[7:4]);
+// Preserve legacy clamp semantics while extended writers use wider porches.
+wire signed [7:0] legacy_h = (ctrl_h > 8'sd8) ? 8'sd8 : (ctrl_h < -8'sd8) ? -8'sd8 : ctrl_h;
 
 // 480i: source line = displayed line * 2 + field, from one progressive frame.
 wire [8:0]  src_line  = scan_interlaced ? ({cur_line[7:0], 1'b0} + {8'd0, field_ddr}) : cur_line;
@@ -184,7 +190,7 @@ always @(posedge ddr_clk) begin
 		fifo_aclr_cnt      <= 4'd0;
 		mode_out           <= 2'd0;
 		h_offset_out       <= 8'sd0;
-		v_offset_out       <= 4'sd0;
+		v_offset_out       <= 6'sd0;
 		line_words         <= 9'd160;
 		scan_lines         <= 9'd240;
 		scan_interlaced    <= 1'b0;
@@ -247,13 +253,14 @@ always @(posedge ddr_clk) begin
 					prev_frame_counter <= 30'd0;
 					mode_out           <= 2'd0;
 					h_offset_out       <= 8'sd0;
-					v_offset_out       <= 4'sd0;
+					v_offset_out       <= 6'sd0;
 					state              <= ST_IDLE;
 				end
 				else begin
 					mode_out     <= ctrl_mode;
-					h_offset_out <= $signed(ctrl_word1[15:8]);
-					v_offset_out <= $signed(ctrl_word1[7:4]);
+					h_offset_out <= extended ? ctrl_h : legacy_h;
+					v_offset_out <= extended ? $signed(ctrl_word1[7:2]) :
+					                (legacy_v > 4'sd2 ? 6'sd2 : {{2{legacy_v[3]}}, legacy_v});
 					line_words   <= (ctrl_mode == 2'd1) ? 9'd360 : 9'd176;
 					scan_lines   <= (ctrl_mode == 2'd2) ? 9'd288 : 9'd240;
 					scan_interlaced <= (ctrl_mode == 2'd1);

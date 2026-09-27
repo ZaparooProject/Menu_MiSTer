@@ -8,7 +8,7 @@
 // the caller) and are latched here at the field wrap so a mid-frame update
 // can't corrupt sync. Offsets shift the image by repartitioning front/back
 // porch; totals are invariant, so line/frame rates never move. Out-of-range
-// offsets are clamped to the supported -8..+8 px / -8..+2 line window, which
+// extended offsets are clamped to the common -31..+9 px / -14..+2 line window, which
 // keeps every mode's effective porches at or above 2 px / 1 line.
 
 module native_video_timing
@@ -18,8 +18,8 @@ module native_video_timing
 	input  wire       reset,
 
 	input  wire        [1:0] mode_in,
-	input  wire signed [7:0] h_offset_in,  // + = right, honored -8..+8 px
-	input  wire signed [3:0] v_offset_in,  // + = down,  honored -8..+2 lines
+	input  wire signed [7:0] h_offset_in,  // + = right, honored -31..+9 px
+	input  wire signed [5:0] v_offset_in,  // + = down,  honored -14..+2 lines
 
 	output reg  [1:0] mode,    // latched active mode; selects the ce_pix divider
 	output reg        field,   // 480i field number, 0 in progressive modes
@@ -67,25 +67,26 @@ end
 
 wire [1:0] next_mode = (mode_in == 2'd3) ? MODE_NTSC : mode_in;
 
-function automatic signed [4:0] clamp_h(input signed [7:0] v);
-	if (v > 8'sd8)       clamp_h = 5'sd8;
-	else if (v < -8'sd8) clamp_h = -5'sd8;
-	else                 clamp_h = v[4:0];
+function automatic signed [7:0] clamp_h(input signed [7:0] v);
+	if (v > 8'sd9)         clamp_h = 8'sd9;
+	else if (v < -8'sd31)  clamp_h = -8'sd31;
+	else                  clamp_h = v;
 endfunction
 
-function automatic signed [3:0] clamp_v(input signed [3:0] v);
-	if (v > 4'sd2) clamp_v = 4'sd2;
-	else           clamp_v = v;
+function automatic signed [5:0] clamp_v(input signed [5:0] v);
+	if (v > 6'sd2)        clamp_v = 6'sd2;
+	else if (v < -6'sd14) clamp_v = -6'sd14;
+	else                 clamp_v = v;
 endfunction
 
-reg signed [4:0] h_offset;
-reg signed [3:0] v_offset;
+reg signed [7:0] h_offset;
+reg signed [5:0] v_offset;
 
 // Sync starts shift with the offset; two's-complement subtraction in
 // unsigned arithmetic yields the correct result at both ends of the range.
-wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{5{h_offset[4]}}, h_offset});
+wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{2{h_offset[7]}}, h_offset});
 wire [9:0] H_SYNC_END   = H_SYNC_START + H_SYNC;
-wire [8:0] V_SYNC_START = V_ACTIVE + (V_FP - {{5{v_offset[3]}}, v_offset});
+wire [8:0] V_SYNC_START = V_ACTIVE + (V_FP - {{3{v_offset[5]}}, v_offset});
 wire [8:0] V_SYNC_END   = V_SYNC_START + V_SYNC;
 
 // In 480i the odd field's vsync transitions half a scanline (H_TOTAL/2
@@ -105,8 +106,8 @@ always @(posedge clk) begin
 	if(reset) begin
 		mode      <= MODE_NTSC;
 		field     <= 1'b0;
-		h_offset  <= 5'sd0;
-		v_offset  <= 4'sd0;
+		h_offset  <= 8'sd0;
+		v_offset  <= 6'sd0;
 		hcount    <= 10'd0;
 		vcount    <= 9'd0;
 		hsync     <= 1'b0;

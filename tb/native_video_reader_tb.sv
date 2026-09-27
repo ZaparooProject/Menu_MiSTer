@@ -285,6 +285,33 @@ initial begin
 	wait (active === 1'b1);
 	$display("pass  timeout: recovered after writer republish");
 
+	// Phase 8: exact Slint extended PAL word, then wider signed trims.
+	$display("--- phase 8: extended protocol ---");
+	ctrl_q = {32'h5A5100F6, 30'd16, 1'b0, 1'b1};
+	wait (vmode === 2'd2); wait_frames(3);
+	check("extended PAL mode bits", vmode, 2);
+	check("extended PAL signed v", dut.timing.v_offset, -3);
+	check_frame_fetch("extended-pal", BUF1_V2, 176, 288, 176, 1, 0, fld_a);
+	ctrl_q = {16'h5A51, -8'sd31, -6'sd14, 2'd0, 30'd17, 1'b0, 1'b0};
+	wait (vmode === 2'd0); wait_frames(3);
+	check("extended wide h", dut.timing.h_offset, -31);
+	check("extended wide v", dut.timing.v_offset, -14);
+	check("extended wide active", {31'd0, active}, 1);
+	ctrl_q = {16'h5A51, 8'sd9, 6'sd2, 2'd1, 30'd18, 1'b0, 1'b1};
+	wait (vmode === 2'd1); wait_frames(3);
+	check("extended 480i h", dut.timing.h_offset, 9);
+	check("extended 480i v", dut.timing.v_offset, 2);
+	check_frame_fetch("extended-480i", BUF1_V2, 360, 240, 180, 2, 1, fld_a);
+
+	// Legacy mode nibble and clamp behavior remain intact.
+	publish(1, 4'd0, 8'sd100, 4'sd7, 19, 0);
+	wait (vmode === 2'd0); wait_frames(3);
+	check("legacy h clamp preserved", dut.timing.h_offset, 8);
+	check("legacy v clamp preserved", dut.timing.v_offset, 2);
+	ctrl_q = {32'h5A520000, 30'd20, 1'b0, 1'b0};
+	wait_frames(3);
+	check("unknown magic rejected", {31'd0, active}, 0);
+
 	if (errors == 0) $display("ALL CHECKS PASSED");
 	else begin
 		$display("%0d CHECK(S) FAILED", errors);
