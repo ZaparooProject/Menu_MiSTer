@@ -1482,7 +1482,9 @@ scanlines #(0) VGA_scanlines
 
 wire [23:0] vga_data_osd0;
 wire        vga_vs_osd0, vga_hs_osd0, vga_de_osd0;
-osd vga_osd
+// Pin the OSD dot width at the 54 MHz clock (see FIXED_PIXSZ in osd.v);
+// the HDMI instance keeps measuring, its scaled stream is 1 clk/pixel.
+osd #(.FIXED_PIXSZ(4)) vga_osd
 (
 	.clk_sys(clk_sys),
 
