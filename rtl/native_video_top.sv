@@ -34,6 +34,7 @@ module native_video_top
 	output wire        vga_new_frame,
 
 	output wire  [1:0] vga_mode,   // active timing mode; selects ce_pix divider
+	output wire signed [7:0] vga_h_size, // analog H size for the sys_top retimer
 	output wire        vga_field,  // 480i field number (VGA_F1)
 	output wire        active
 );
@@ -52,13 +53,16 @@ wire       tim_field;
 wire  [1:0] rd_mode;
 wire signed [7:0] rd_h_offset;
 wire signed [5:0] rd_v_offset;
+wire signed [7:0] rd_h_size;
 
 reg [1:0] mode_sync     [1:0];
 reg [7:0] h_offset_sync [1:0];
 reg [5:0] v_offset_sync [1:0];
+reg [7:0] h_size_sync   [1:0];
 always @(posedge clk_vid) begin
 	mode_sync[0]     <= rd_mode;       mode_sync[1]     <= mode_sync[0];
 	h_offset_sync[0] <= rd_h_offset;   h_offset_sync[1] <= h_offset_sync[0];
+	h_size_sync[0]   <= rd_h_size;     h_size_sync[1]   <= h_size_sync[0];
 	v_offset_sync[0] <= rd_v_offset;   v_offset_sync[1] <= v_offset_sync[0];
 end
 
@@ -110,6 +114,7 @@ native_video_reader reader
 	.mode_out       (rd_mode),
 	.h_offset_out   (rd_h_offset),
 	.v_offset_out   (rd_v_offset),
+	.h_size_out     (rd_h_size),
 
 	.r_out          (vga_r),
 	.g_out          (vga_g),
@@ -126,5 +131,7 @@ assign vga_vcount    = tim_vcount;
 assign vga_new_frame = tim_new_frame;
 assign vga_field     = tim_field;
 assign active        = frame_ready;
+
+assign vga_h_size = $signed(h_size_sync[1]);
 
 endmodule
