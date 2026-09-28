@@ -1480,8 +1480,8 @@ scanlines #(0) VGA_scanlines
 	.ce_out(vga_ce_sl)
 );
 
-wire [23:0] vga_data_osd;
-wire        vga_vs_osd, vga_hs_osd, vga_de_osd;
+wire [23:0] vga_data_osd0;
+wire        vga_vs_osd0, vga_hs_osd0, vga_de_osd0;
 osd vga_osd
 (
 	.clk_sys(clk_sys),
@@ -1497,6 +1497,42 @@ osd vga_osd
 	.vs_in(vga_vs_sl),
 	.de_in(vga_de_sl),
 
+	.dout(vga_data_osd0),
+	.hs_out(vga_hs_osd0),
+	.vs_out(vga_vs_osd0),
+	.de_out(vga_de_osd0)
+);
+
+// osd is a fixed 4-register pipeline on data and syncs with no CE port;
+// delaying the scanlines CE by the same 4 clocks restores at the retimer
+// input the CE/data phase that scanlines guarantees at the OSD input.
+reg [3:0] vga_ce_osd_sr = 0;
+always @(posedge clk_vid) vga_ce_osd_sr <= {vga_ce_osd_sr[2:0], vga_ce_sl};
+wire vga_ce_osd = vga_ce_osd_sr[3];
+
+// Menu-fork analog H-size retimer (rtl/zaparoo_hretime.sv). Analog branch
+// only: csync/YC/RGB and direct video below all consume its outputs under
+// the original vga_*_osd names; the HDMI/ascal tap is upstream of the OSD
+// and is untouched. Controls come from the emu sideband (CLK_VIDEO domain,
+// quasi-static; hretime latches them per line at HSYNC).
+wire        crt_hsize_en;
+wire signed [3:0] crt_hsize_scale;
+wire  [1:0] crt_hsize_mode;
+wire [23:0] vga_data_osd;
+wire        vga_vs_osd, vga_hs_osd, vga_de_osd;
+zaparoo_hretime vga_hretime
+(
+	.clk(clk_vid),
+	.reset(reset),
+	.ce_in(vga_ce_osd),
+	.enable(crt_hsize_en),
+	.mode(crt_hsize_mode),
+	.scale(crt_hsize_scale),
+	.din(vga_data_osd0),
+	.hs_in(vga_hs_osd0),
+	.vs_in(vga_vs_osd0),
+	.de_in(vga_de_osd0),
+	.ce_out(),
 	.dout(vga_data_osd),
 	.hs_out(vga_hs_osd),
 	.vs_out(vga_vs_osd),
@@ -1852,6 +1888,9 @@ emu emu
 	.VGA_DE(de_emu),
 	.VGA_F1(f1),
 	.VGA_SCALER(vga_force_scaler),
+	.CRT_HSIZE_EN(crt_hsize_en),
+	.CRT_HSIZE_SCALE(crt_hsize_scale),
+	.CRT_HSIZE_MODE(crt_hsize_mode),
 
 `ifndef MISTER_DUAL_SDRAM
 	.VGA_DISABLE(VGA_DISABLE),
