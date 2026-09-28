@@ -31,3 +31,9 @@ run_test native_video_timing_tb \
 run_test native_video_reader_tb \
 	../rtl/native_video_timing.sv ../rtl/native_video_reader.sv \
 	../rtl/native_video_top.sv dcfifo_sim.sv native_video_reader_tb.sv
+
+run_test hsize_map_tb ../rtl/zaparoo_hsize_map.sv hsize_map_tb.sv
+
+run_test hretime_tb ../rtl/zaparoo_hretime.sv hretime_tb.sv
+
+run_test hretime_480i_tb ../rtl/zaparoo_hretime.sv hretime_480i_tb.sv
