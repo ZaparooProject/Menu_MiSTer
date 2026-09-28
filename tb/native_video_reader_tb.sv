@@ -21,19 +21,19 @@
 module native_video_reader_tb;
 
 reg clk_sys = 0; always #5       clk_sys = ~clk_sys;  // 100 MHz DDR-side
-reg clk_vid = 0; always #18.5185 clk_vid = ~clk_vid;  // 27 MHz
+reg clk_vid = 0; always #9.2593 clk_vid = ~clk_vid;   // 54 MHz
 reg reset = 1;
 
 wire [1:0] vmode;
 wire       vfield;
 
-// ce_pix divider mirrors menu.sv.
-reg [1:0] ce_div = 0;
+// ce_pix divider mirrors menu.sv: /8 progressive, /4 480i.
+reg [2:0] ce_div = 0;
 reg       ce_pix = 0;
 always @(posedge clk_vid) begin
-	if (reset) ce_div <= 2'd0;
-		else  ce_div <= ce_div + 2'd1;
-	ce_pix <= (vmode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
+	if (reset) ce_div <= 3'd0;
+		else  ce_div <= ce_div + 3'd1;
+	ce_pix <= (vmode == 2'd1) ? (ce_div[1:0] == 2'd0) : (ce_div == 3'd0);
 end
 
 // ---- DDR model -------------------------------------------------------------
