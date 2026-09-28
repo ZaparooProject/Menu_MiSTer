@@ -15,6 +15,11 @@
 //   - DDR timeout: unresponsive bus drops active instead of latching stale
 //
 // Run: tb/run.sh
+//
+// Split across two compiles so each stays inside the repo's 600 s per-test
+// wall clock at the 54 MHz video clock (about 8 s of CPU per simulated
+// frame on CI): the default build runs phases 0-5, and -DREADER_TB_PART2
+// runs phase 0 plus phases 6-9 from a cold reset.
 
 `timescale 1ns/1ps
 
@@ -215,6 +220,7 @@ initial begin
 	check("idle: only ctrl polls",       req_cnt[req_n-1], 2);
 	check("idle: poll addr",             req_addr[req_n-1], CTRL_ADDR);
 
+`ifndef READER_TB_PART2
 	// Phase 1: v2 writer, mode 0, offsets +5/-3, buffer 0.
 	$display("--- phase 1: v2 mode 0 ---");
 	publish(1, 4'd0, 8'sd5, -4'sd3, 1, 0);
@@ -270,6 +276,9 @@ initial begin
 	wait_frames(2);
 	check_frame_fetch("pal", BUF0_V2, 176, 288, 176, 1, 0, fld_a);
 
+`endif
+
+`ifdef READER_TB_PART2
 	// Phase 6: 480i.
 	$display("--- phase 6: v2 mode 1 (480i) ---");
 	publish(1, 4'd1, 8'sd0, 4'sd0, 13, 0);
@@ -329,31 +338,32 @@ initial begin
 	check("h_size default 0",            dut.reader.h_size_out, 0);
 	check("h_size top port 0",           dut.vga_h_size, 0);
 	set_word2(1, 8'sd2);
-	wait_frames(3);
+	wait_frames(2);
 	check("h_size +2 decoded",           dut.reader.h_size_out, 2);
 	check("h_size top port +2",          dut.vga_h_size, 2);
 	set_word2(1, -8'sd8);
-	wait_frames(3);
+	wait_frames(2);
 	check("h_size -8 decoded",           dut.reader.h_size_out, -8);
 	set_word2(1, 8'sd5);
-	wait_frames(3);
+	wait_frames(2);
 	check("h_size +5 clamps to +2",      dut.reader.h_size_out, 2);
 	set_word2(1, -8'sd20);
-	wait_frames(3);
+	wait_frames(2);
 	check("h_size -20 clamps to -8",     dut.reader.h_size_out, -8);
 	set_word2(0, 8'sd2);
-	wait_frames(3);
+	wait_frames(2);
 	check("wrong word2 magic reads 0",   dut.reader.h_size_out, 0);
 	set_word2(1, -8'sd4);
-	wait_frames(3);
+	wait_frames(2);
 	check("h_size follows live writer",  dut.reader.h_size_out, -4);
 	ctrl_q = 64'd0;
-	wait_frames(3);
+	wait_frames(2);
 	check("stopped writer resets h_size", dut.reader.h_size_out, 0);
 	publish(0, 4'd0, 8'sd0, 4'sd0, 22, 0);
-	wait_frames(3);
+	wait_frames(2);
 	check("no word1 magic keeps h_size 0", dut.reader.h_size_out, 0);
 	ctrl_q2 = 64'd0;
+`endif
 
 	if (errors == 0) $display("ALL CHECKS PASSED");
 	else begin

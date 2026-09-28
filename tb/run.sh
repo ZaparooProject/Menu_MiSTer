@@ -32,6 +32,15 @@ run_test native_video_reader_tb \
 	../rtl/native_video_timing.sv ../rtl/native_video_reader.sv \
 	../rtl/native_video_top.sv dcfifo_sim.sv native_video_reader_tb.sv
 
+# Part 2 (phases 6-9) of the same testbench; the split keeps each run
+# inside the 600 s wall clock at the 54 MHz video clock.
+echo "=== native_video_reader_tb (part 2) ==="
+iverilog -g2012 -I ../sys -DREADER_TB_PART2=1 -s native_video_reader_tb \
+	-o ../test-output/rtl/native_video_reader_tb_part2.vvp \
+	../rtl/native_video_timing.sv ../rtl/native_video_reader.sv \
+	../rtl/native_video_top.sv dcfifo_sim.sv native_video_reader_tb.sv
+timeout 600 vvp ../test-output/rtl/native_video_reader_tb_part2.vvp
+
 run_test hsize_map_tb ../rtl/zaparoo_hsize_map.sv hsize_map_tb.sv
 
 run_test hretime_tb ../rtl/zaparoo_hretime.sv hretime_tb.sv
