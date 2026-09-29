@@ -1,17 +1,18 @@
-// Self-checking Menu horizontal re-timer test. The Menu input is fixed at
-// CLK_VIDEO / 8 (54 MHz / 8 = 6.75 MHz) and has the narrow NTSC front porch,
-// the binding worst case (PAL porches are wider at the same pixel rate).
-// The positive range stops at effective +2 so all pixels drain before HS.
+// Self-checking Menu horizontal re-timer test at the wired cadence: the
+// retimer samples at CLK_VIDEO / 4 (13.5 MHz), so a progressive NTSC line
+// is 704 half-pixel dots (the OSD dot rate) with the narrow NTSC porches,
+// the binding worst case (PAL porches are wider at the same rate).
+// The positive range stops at effective +2 so all dots drain before HS.
 // Sweeps every UI step (effective -8..-1, +1, +2) plus the bypass path,
-// asserting pixel identity, emitted count, active span and quiet HSYNC.
+// asserting dot identity, emitted count, active span and quiet HSYNC.
 `timescale 1ns/1ps
 
 module hretime_tb;
 
-localparam integer H_ACTIVE = 352;
-localparam integer H_FP = 12;
-localparam integer H_SYNC = 32;
-localparam integer H_BP = 33;
+localparam integer H_ACTIVE = 704;  // dots: 352 px x 2
+localparam integer H_FP = 24;
+localparam integer H_SYNC = 64;
+localparam integer H_BP = 66;
 localparam integer H_TOTAL = H_ACTIVE + H_FP + H_SYNC + H_BP;
 localparam integer V_ACTIVE = 3;
 localparam integer V_TOTAL = 4;
@@ -20,7 +21,7 @@ reg clk = 0;
 always #9.2593 clk = ~clk;
 
 reg reset = 1;
-reg [2:0] div = 0;
+reg [1:0] div = 0;
 reg ce_in = 0;
 reg [9:0] hcount = 0;
 reg [3:0] vcount = 0;
@@ -35,9 +36,9 @@ always @(posedge clk) begin
 		vcount <= 0;
 	end
 	else begin
-		ce_in <= (div == 3'd7);
+		ce_in <= (div == 2'd3);
 		div <= div + 1'd1;
-		if(div == 3'd7) begin
+		if(div == 2'd3) begin
 			if(hcount == H_TOTAL - 1) begin
 				hcount <= 0;
 				vcount <= (vcount == V_TOTAL - 1) ? 0 : vcount + 1'd1;
@@ -56,7 +57,7 @@ wire ce_out, hs_out, vs_out, de_out;
 wire [23:0] dout;
 zaparoo_hretime dut
 (
-	.clk(clk), .reset(reset), .ce_in(ce_in), .enable(enable), .mode(2'd0), .scale(scale),
+	.clk(clk), .reset(reset), .ce_in(ce_in), .enable(enable), .mode(2'd1), .scale(scale),
 	.din(din), .hs_in(hs_in), .vs_in(vs_in), .de_in(de_in),
 	.ce_out(ce_out), .dout(dout), .hs_out(hs_out), .vs_out(vs_out), .de_out(de_out)
 );
@@ -78,8 +79,8 @@ always @(posedge clk) begin
 
 	if(ce_out_d && de_out) begin
 		if(got == 0) first_tick <= ticks;
-		if(checking && expected_scale == -8 && got != 0 && ticks - last_tick != 7) begin
-			$display("FAIL: -8 progressive spacing %0d, expected 7 clocks", ticks - last_tick);
+		if(checking && expected_scale == -8 && got != 0 && ticks - last_tick < 3) begin
+			$display("FAIL: -8 spacing %0d, registered RAM read needs >= 3 clocks", ticks - last_tick);
 			errors <= errors + 1;
 		end
 		last_tick <= ticks;
@@ -98,7 +99,7 @@ always @(posedge clk) begin
 		if(checking && got != 0) begin
 			integer expected_span;
 			integer span;
-			expected_span = ((H_ACTIVE - 1) * 8 * (64 + expected_scale)) / 64;
+			expected_span = ((H_ACTIVE - 1) * 4 * (64 + expected_scale)) / 64;
 			span = last_tick - first_tick;
 			if(got != H_ACTIVE) begin
 				$display("FAIL: scale %0d emitted %0d pixels, expected %0d", expected_scale, got, H_ACTIVE);

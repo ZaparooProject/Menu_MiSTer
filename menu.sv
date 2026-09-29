@@ -397,7 +397,8 @@ zaparoo_hsize_map hsize_map
 	.enable (CRT_HSIZE_EN),
 	.scale  (CRT_HSIZE_SCALE)
 );
-assign CRT_HSIZE_MODE = native_mode;
+// (480i bypass is decided here in hsize_map; sys_top's retimer runs at a
+// constant 13.5 MHz sample rate in every mode.)
 
 // Keep upstream's asynchronous noise source and grayscale weighting. Only
 // the frame-phase enable differs: native timing stretches new_frame over

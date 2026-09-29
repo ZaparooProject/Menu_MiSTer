@@ -1505,12 +1505,15 @@ osd #(.FIXED_PIXSZ(4)) vga_osd
 	.de_out(vga_de_osd0)
 );
 
-// osd is a fixed 4-register pipeline on data and syncs with no CE port;
-// delaying the scanlines CE by the same 4 clocks restores at the retimer
-// input the CE/data phase that scanlines guarantees at the OSD input.
-reg [3:0] vga_ce_osd_sr = 0;
-always @(posedge clk_vid) vga_ce_osd_sr <= {vga_ce_osd_sr[2:0], vga_ce_sl};
-wire vga_ce_osd = vga_ce_osd_sr[3];
+// The retimer samples at a constant 13.5 MHz (clk_vid/4): one 480i pixel,
+// or half a progressive pixel = one OSD dot (osd.v FIXED_PIXSZ). Sampling
+// at the OSD dot rate carries the OSD's half-pixel glyph strokes through
+// the retimer intact; a pixel-rate CE keeps only one of the two dots per
+// pixel and decimates the OSD font. Dot and pixel grids are phase-stable
+// against this free-running divider, so each dot is sampled exactly once.
+reg [1:0] vga_ce_dot_div = 0;
+always @(posedge clk_vid) vga_ce_dot_div <= vga_ce_dot_div + 1'd1;
+wire vga_ce_dot = (vga_ce_dot_div == 2'd0);
 
 // Menu-fork analog H-size retimer (rtl/zaparoo_hretime.sv). Analog branch
 // only: csync/YC/RGB and direct video below all consume its outputs under
@@ -1519,16 +1522,17 @@ wire vga_ce_osd = vga_ce_osd_sr[3];
 // quasi-static; hretime latches them per line at HSYNC).
 wire        crt_hsize_en;
 wire signed [3:0] crt_hsize_scale;
-wire  [1:0] crt_hsize_mode;
 wire [23:0] vga_data_osd;
 wire        vga_vs_osd, vga_hs_osd, vga_de_osd;
 zaparoo_hretime vga_hretime
 (
 	.clk(clk_vid),
 	.reset(reset),
-	.ce_in(vga_ce_osd),
+	.ce_in(vga_ce_dot),
 	.enable(crt_hsize_en),
-	.mode(crt_hsize_mode),
+	// Base 4 clocks per sample in every mode (the proven 480i cadence);
+	// 480i gating happens upstream in zaparoo_hsize_map.
+	.mode(2'd1),
 	.scale(crt_hsize_scale),
 	.din(vga_data_osd0),
 	.hs_in(vga_hs_osd0),
@@ -1892,7 +1896,6 @@ emu emu
 	.VGA_SCALER(vga_force_scaler),
 	.CRT_HSIZE_EN(crt_hsize_en),
 	.CRT_HSIZE_SCALE(crt_hsize_scale),
-	.CRT_HSIZE_MODE(crt_hsize_mode),
 
 `ifndef MISTER_DUAL_SDRAM
 	.VGA_DISABLE(VGA_DISABLE),

@@ -3,8 +3,9 @@
 // Each source pixel is emitted once, but is held for a slightly different
 // number of CLK_VIDEO cycles. This adjusts the analogue picture width without
 // resampling or changing normal HDMI/ascal. Raw direct-video HDMI follows the
-// same analogue branch. The 54 MHz Menu source is fixed at eight CLK_VIDEO
-// cycles per 240p/PAL pixel and four per 480i pixel.
+// same analogue branch. The Menu feeds it 13.5 MHz samples (four 54 MHz
+// clocks each): one 480i pixel, or half a progressive pixel = one OSD dot,
+// so the OSD's half-pixel strokes survive retiming.
 //
 // The source is intentionally based on jtframe_hretime by Andrea Bogazzi and
 // the CRT-Adjust module by Umberto Parisi. It is kept as a Menu-specific

@@ -154,6 +154,5 @@ output  [6:0] USER_OUT,
 // quasi-static). Consumed by sys_top's zaparoo_hretime after the VGA OSD.
 output        CRT_HSIZE_EN,
 output signed [3:0] CRT_HSIZE_SCALE,
-output  [1:0] CRT_HSIZE_MODE,
 
 input         OSD_STATUS
