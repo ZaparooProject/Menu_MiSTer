@@ -9,10 +9,11 @@ access to GPL-only kernel exports.
 
 ## Compatibility policy
 
-Initially support only the exact qualified MiSTer 6.18 kernel build. Do not
-force-load a module, update the kernel, or reuse an unverified module. Unknown
-and older kernels retain the ordinary fb0 frontend path. Future kernel changes
-require rebuilding and requalifying the module and its memory-map contract.
+The default build targets the official September 12, 2026 MiSTer stock image,
+not a replacement kernel. Do not force-load a module, update the kernel, or reuse
+an unverified module. Unknown and older kernels retain the ordinary fb0 frontend
+path. Future kernel changes require rebuilding and requalifying the module and
+its memory-map contract.
 
 Use a Zaparoo-specific module/device identity and ABI. Do not install over
 `mem_wc.ko` or `mister_magik_scanout_slots.ko`, or unload someone else's module.
@@ -41,45 +42,64 @@ Do not claim concurrent DreamSTer/MagiK/Zaparoo rendering is supported.
 - https://github.com/skmp/minicast/tree/master/mem_wc
 - https://github.com/MiSTer-devel/Linux-Kernel_MiSTer/tree/MiSTer-v6.18
 
-## Qualified build
+## Reproducible stock build
 
-CI builds the module in a separate job from Quartus and uploads
-`zaparoo-scanout` containing `zaparoo-scanout.zip`. It does not
-install the module or change the device kernel. Only the checksum-verified
-compiler archive is cached; kernel output and `Module.symvers` are built fresh.
+CI builds the module separately from Quartus and uploads `zaparoo-scanout`
+containing `zaparoo-scanout.zip`. It does not install the module or change the
+device kernel. Only the checksum-verified compiler archive is cached; kernel
+output and `Module.symvers` are built fresh.
 
-Run the same build from the Menu repository root. Install the build packages
-listed in `.github/workflows/ci_build.yml`, then:
+Run from the Menu repository root with the kernel build packages listed in
+`.github/workflows/ci_build.yml`:
 
 ```sh
-rustup toolchain install 1.95.0 --profile minimal
 bash kernel/build-scanout.sh
 ```
 
-The script pins the kernel revision and verifies the GNU ARM 10.2.1 archive's
-SHA-256 before extracting it. Rust 1.95.0 reproduces Kconfig's tool-detection
-fields; the kernel/module build does not compile Rust. All downloaded inputs
-and kernel output stay under ignored `kernel/.build/ci/`.
+The entrypoint runs the stock verification tests, then `build-stock-scanout.sh`.
+`stock-20260912.json` pins the official image URL/hash, source revision, compiler,
+config, symbol-table hash, build metadata, and normalized loaded Image hash.
+The build downloads that exact official image and extracts its embedded config
+using the standard-library Python verifier, not a locally saved device config.
+It disables Rust/pahole/bindgen detection to preserve the stock Kconfig result.
 
-For local reuse, `CROSS_COMPILE` may point to Main's qualified GNU toolchain
-(not the frontend's musl compiler), and `KERNEL_SRC` may point to an existing
-clean checkout of the pinned revision. `BUILD_ROOT` accepts an absolute build
-path, and `JOBS` controls parallelism. The full kernel build creates real
-`Module.symvers`; do not suppress modpost errors or substitute
-`modules_prepare` alone.
+The compiler archive is SHA-256 verified before extraction. The source remains
+unmodified at `912aa5608a4f7be881a068c36148ca1e5abb8d20`. Stock user, host,
+version, and timestamp are explicit. The weak `init/version.o` uses the original
+temporary `# SMP ` banner; the final strong version object uses the stock build
+number and timestamp. Neither depends on the local clock.
 
-The module Makefile rejects a different source revision, tracked source edits,
-config fingerprint, compiler version or missing symbol table. Do not loosen
-these checks to make an unknown build pass. Expected vermagic:
-`6.18.38-MiSTer SMP mod_unload ARMv7 p2v8`.
-
-Qualification evidence:
+Packaging compares **every byte** of the reproduced ARM Image with the official
+Image except the 20-byte GNU build-ID descriptor, whose note header and offset
+are checked too. The normalized Image hash must match the pinned hash. Build IDs
+can differ because the linked ELF includes debug/build metadata that is not in
+the booted raw Image. Provenance records both IDs; the profile names the verified
+stock ID. Any other byte difference, wrong config/symbol hash, or module metadata
+mismatch rejects packaging. This is not permission to relabel an old module.
 
 | Input | SHA-256 |
 |---|---|
-| Generated `.config` | `0d010a3d551cbffcd91af7850f3f745ce73f3bb911cfd56ead902fc9b6c69823` |
-| `drivers/video/fbdev/MiSTer_fb.c` | `f4044889e96a843a54bde091737825043b71b6bb8994fe3f92387cccd6ee3924` |
-| `arch/arm/boot/dts/intel/socfpga/socfpga_cyclone5_de10_nano.dts` | `5c03d8ffb9e1477523d6434c5255db46433158f771fb6288320c42f8d3484938` |
+| Official `zImage_dtb` | `ab46baa275c38fb08611343836345e7aa14f153860ec09d106010436a1784bb5` |
+| Embedded `.config` | `584c7fdb7884616363b38c0514266a5fc40083ae327d9a71e72deb6f3101cdab` |
+| `Module.symvers` | `f58b220d8cdcb925afdd4ba4a4c0a04c02154a8f2fc658cc1fa885b89f79952f` |
+| Image with GNU build-ID descriptor zeroed | `cd987213cee026bdfdfc5146f1bbb96aeda23c4e00bb754637e1fca37deb39cc` |
+
+Expected running build ID: `ff9b30a1fb06e7bbc78274cdbf223a0131a61240`.
+Expected vermagic: `6.18.38-MiSTer SMP mod_unload ARMv7 p2v8`.
+
+Inputs/output stay under ignored `kernel/.build/ci/stock-20260912/`; the final ZIP
+is `kernel/.build/ci/zaparoo-scanout.zip`. `BUILD_ROOT` overrides the build root,
+`JOBS` controls parallelism, `KERNEL_SRC` accepts a clean checkout at the exact
+revision, and `CROSS_COMPILE` accepts a trusted GNU ARM 10.2.1 toolchain (not the
+frontend's musl compiler). The generated module directory contains matching
+source, stock revision header, and strict `stock-module.mk` as its Makefile.
+The original prototype source/header/Makefile pins remain unchanged.
+
+For archival prototype reproduction only, use `bash kernel/build-prototype-scanout.sh`
+with Rust 1.95.0 installed and a separate `BUILD_ROOT`. That retains the older
+`aec7dc3` source and `0d010a3d...` config contract; its profile is not the stock
+profile. Never suppress modpost errors or substitute `modules_prepare` for the
+full build that creates genuine symbol exports.
 
 ABI v1 uses `/dev/zaparoo-scanout`, ioctl `_IOR('Z', 1, layout)` and a 64-byte
 layout. Slots start at `0x23000000` and `0x23400000`, outside the complete
@@ -109,8 +129,9 @@ option follows the official newest image. These are moving distribution policies
 not kernel ABIs. Do not select a module from downloader settings or the image on
 disk: the running kernel may still precede an update awaiting reboot.
 
-`kernel/package-scanout.py` runs after the qualified build and writes
-`kernel/.build/ci/zaparoo-scanout.zip`. Each profile is installed under
+`kernel/stock-scanout.py package` runs after stock reproduction and writes
+`kernel/.build/ci/zaparoo-scanout.zip` (`package-scanout.py` remains the prototype
+packager). Each profile is installed under
 `zaparoo/modules/<kernel-release>/<GNU-kernel-build-id>/`. The profile contains
 the module build ID, SHA-256, kernel revision, and Zaparoo's v1 1080p contract
 identifier. The ZIP also carries kernel config/symbol-table checksums and matching
@@ -122,12 +143,21 @@ module digest before insmod and the loaded module's GNU build ID before granting
 a lease. Missing notes, missing profiles and mismatches retain fb0. Old flat
 `modules/<release>/zaparoo_scanout.ko` installations no longer enable scanout.
 
-The existing source/config/compiler pins remain in force. A locally built kernel
-with the same release string as a stock image is not evidence of compatibility:
-its build ID may differ. Never relabel a profile to match a different image.
-Adding a pinned or Edge build requires its exact source/config/symbol inputs,
-verification against the actual running image, and the hardware tests above.
-Multiple tested builds with the same release string can coexist in one bundle.
+A locally built kernel with the same release string as a stock image is not
+evidence of compatibility. The stock path permits an identity difference only
+after the full Image comparison above. Adding another pinned or Edge build needs
+its own exact source/config/symbol inputs, official-image verification, and the
+hardware tests above. Multiple tested builds with the same release string can
+coexist in one bundle.
+
+At September 2026 qualification, Update All pinned and Edge manifests both
+selected this September 12 stock image. That observation is not a permanent
+channel guarantee: recheck manifests before releasing, and add separate profiles
+when they diverge. The prior stock-target module passed cold loading and frontend
+crash/relaunch with accelerated scanout on the matched Main/Menu/frontend stack.
+Those observations do not automatically qualify each new module artifact or
+replace physical output, ownership-handoff, and fallback checks. New bundles keep
+an explicit qualification-required provenance marker until release validation.
 
 After device qualification of the matched Main/Menu/frontend stack, attach
 `zaparoo-scanout.zip` to that Menu release explicitly. The frontend packaging
