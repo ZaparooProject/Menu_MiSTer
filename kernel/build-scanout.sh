@@ -58,3 +58,10 @@ make -C "$root/kernel/scanout-slots" KERNEL_SRC="$kernel_src" KERNEL_BUILD="$ker
 vermagic=$(modinfo -F vermagic "$root/kernel/scanout-slots/zaparoo_scanout.ko")
 test "${vermagic% }" = '6.18.38-MiSTer SMP mod_unload ARMv7 p2v8'
 sha256sum "$root/kernel/scanout-slots/zaparoo_scanout.ko"
+
+# The installed profile binds runtime selection to the built kernel, not merely
+# uname -r. A stock image with a different ID remains on fb0 until qualified.
+python3 "$root/kernel/package-scanout.py" \
+    --kernel-build "$kernel_build" \
+    --module "$root/kernel/scanout-slots/zaparoo_scanout.ko" \
+    --output "$build_root/zaparoo-scanout.zip"

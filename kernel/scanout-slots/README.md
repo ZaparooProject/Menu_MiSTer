@@ -44,7 +44,7 @@ Do not claim concurrent DreamSTer/MagiK/Zaparoo rendering is supported.
 ## Qualified build
 
 CI builds the module in a separate job from Quartus and uploads
-`zaparoo-scanout-6.18.38-MiSTer` containing `zaparoo_scanout.ko`. It does not
+`zaparoo-scanout` containing `zaparoo-scanout.zip`. It does not
 install the module or change the device kernel. Only the checksum-verified
 compiler archive is cached; kernel output and `Module.symvers` are built fresh.
 
@@ -101,3 +101,38 @@ executable mappings and fork inheritance are disabled.
 Successful compilation is **not hardware qualification**. Before installing
 or distributing the artifact, verify the matched Main/frontend/Menu stack on
 the target device, including ownership handoff, crash recovery and fb0 fallback.
+
+## Exact-build distribution profiles
+
+Update All's default distribution pins a reviewed Linux image; its Edge Linux
+option follows the official newest image. These are moving distribution policies,
+not kernel ABIs. Do not select a module from downloader settings or the image on
+disk: the running kernel may still precede an update awaiting reboot.
+
+`kernel/package-scanout.py` runs after the qualified build and writes
+`kernel/.build/ci/zaparoo-scanout.zip`. Each profile is installed under
+`zaparoo/modules/<kernel-release>/<GNU-kernel-build-id>/`. The profile contains
+the module build ID, SHA-256, kernel revision, and Zaparoo's v1 1080p contract
+identifier. The ZIP also carries kernel config/symbol-table checksums and matching
+module sources with their existing attribution. Do not strip or rewrite the
+module after packaging. This is integrity/provenance, not a signature.
+
+Main reads `/sys/kernel/notes` and accepts only that exact profile; it checks the
+module digest before insmod and the loaded module's GNU build ID before granting
+a lease. Missing notes, missing profiles and mismatches retain fb0. Old flat
+`modules/<release>/zaparoo_scanout.ko` installations no longer enable scanout.
+
+The existing source/config/compiler pins remain in force. A locally built kernel
+with the same release string as a stock image is not evidence of compatibility:
+its build ID may differ. Never relabel a profile to match a different image.
+Adding a pinned or Edge build requires its exact source/config/symbol inputs,
+verification against the actual running image, and the hardware tests above.
+Multiple tested builds with the same release string can coexist in one bundle.
+
+After device qualification of the matched Main/Menu/frontend stack, attach
+`zaparoo-scanout.zip` to that Menu release explicitly. The frontend packaging
+script includes this asset only when `ZAPAROO_INCLUDE_SCANOUT=1`; a requested
+missing or invalid bundle fails packaging. CI generation alone does not publish
+or qualify the module. Keep older tested profiles available for users who switch
+streams or have not rebooted yet. MagiK's larger Main-window mapping, diagnostics
+and FPGA protocol changes are not imported by this identity-only update.
