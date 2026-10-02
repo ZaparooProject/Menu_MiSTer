@@ -14,7 +14,7 @@
 module native_video_timing_tb;
 
 reg clk = 0;
-always #18.5185 clk = ~clk;   // 27 MHz
+always #9.2593 clk = ~clk;    // 54 MHz
 
 reg reset = 1;
 
@@ -27,13 +27,13 @@ wire       field, hsync, vsync, hblank, vblank, de, new_frame, new_line;
 wire [9:0] hcount;
 wire [8:0] vcount;
 
-// ce_pix divider mirrors menu.sv: /4 (6.75 MHz) progressive, /2 (13.5 MHz) 480i.
-reg [1:0] ce_div = 0;
+// ce_pix divider mirrors menu.sv: /8 (6.75 MHz) progressive, /4 (13.5 MHz) 480i.
+reg [2:0] ce_div = 0;
 reg       ce_pix = 0;
 always @(posedge clk) begin
-	if (reset) ce_div <= 2'd0;
-		else  ce_div <= ce_div + 2'd1;
-	ce_pix <= (mode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
+	if (reset) ce_div <= 3'd0;
+		else  ce_div <= ce_div + 3'd1;
+	ce_pix <= (mode == 2'd1) ? (ce_div[1:0] == 2'd0) : (ce_div == 3'd0);
 end
 
 native_video_timing dut

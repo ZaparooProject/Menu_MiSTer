@@ -15,25 +15,30 @@
 //   - DDR timeout: unresponsive bus drops active instead of latching stale
 //
 // Run: tb/run.sh
+//
+// Split across two compiles so each stays inside the repo's 600 s per-test
+// wall clock at the 54 MHz video clock (about 8 s of CPU per simulated
+// frame on CI): the default build runs phases 0-5, and -DREADER_TB_PART2
+// runs phase 0 plus phases 6-9 from a cold reset.
 
 `timescale 1ns/1ps
 
 module native_video_reader_tb;
 
 reg clk_sys = 0; always #5       clk_sys = ~clk_sys;  // 100 MHz DDR-side
-reg clk_vid = 0; always #18.5185 clk_vid = ~clk_vid;  // 27 MHz
+reg clk_vid = 0; always #9.2593 clk_vid = ~clk_vid;   // 54 MHz
 reg reset = 1;
 
 wire [1:0] vmode;
 wire       vfield;
 
-// ce_pix divider mirrors menu.sv.
-reg [1:0] ce_div = 0;
+// ce_pix divider mirrors menu.sv: /8 progressive, /4 480i.
+reg [2:0] ce_div = 0;
 reg       ce_pix = 0;
 always @(posedge clk_vid) begin
-	if (reset) ce_div <= 2'd0;
-		else  ce_div <= ce_div + 2'd1;
-	ce_pix <= (vmode == 2'd1) ? ce_div[0] : (ce_div == 2'd0);
+	if (reset) ce_div <= 3'd0;
+		else  ce_div <= ce_div + 3'd1;
+	ce_pix <= (vmode == 2'd1) ? (ce_div[1:0] == 2'd0) : (ce_div == 3'd0);
 end
 
 // ---- DDR model -------------------------------------------------------------
@@ -49,6 +54,7 @@ reg  [63:0] ddr_dout = 0;
 reg         ddr_dout_ready = 0;
 
 reg  [63:0] ctrl_q = 64'd0;   // {word1, word0} as published by the "writer"
+reg  [63:0] ctrl_q2 = 64'd0;  // beat 2 at 0x08: {reserved word3, word2}
 reg         respond_en = 1;
 
 integer req_n = 0;
@@ -74,7 +80,8 @@ always @(posedge clk_sys) begin
 	else if (cur_left != 0) begin
 		if (lat != 0) lat <= lat - 1;
 		else begin
-			ddr_dout       <= (cur_addr == CTRL_ADDR) ? ctrl_q : PIX_DATA;
+			ddr_dout       <= (cur_addr == CTRL_ADDR)           ? ctrl_q  :
+			                  (cur_addr == CTRL_ADDR + 29'd1) ? ctrl_q2 : PIX_DATA;
 			ddr_dout_ready <= 1;
 			cur_addr       <= cur_addr + 29'd1;
 			cur_left       <= cur_left - 1;
@@ -144,6 +151,13 @@ task publish(input bit magic, input [3:0] pmode, input signed [7:0] hoff,
 	end
 endtask
 
+// Publish the interim analog H-size word2 in the second control beat.
+task set_word2(input bit magic, input signed [7:0] size);
+	begin
+		ctrl_q2 = {32'd0, magic ? 16'h5A52 : 16'hBEEF, 8'h00, size};
+	end
+endtask
+
 // Verify one whole frame's DDR request sequence: a control poll followed by
 // nlines line fetches of bpl bursts of blen beats each, line l fetched from
 // base + src*stride + b*blen, where src = l (progressive) or 2*l + field
@@ -163,7 +177,7 @@ task check_frame_fetch(input string tag, input [28:0] base, input integer stride
 		check({tag, " fifo overflow-free"}, dut.reader.line_fifo.overflow_count, 0);
 		$display("info  %s fifo peak occupancy: %0d / 1024 words", tag, dut.reader.line_fifo.peak_used);
 		check({tag, " ctrl poll addr"}, req_addr[s], CTRL_ADDR);
-		check({tag, " ctrl poll burst"}, req_cnt[s], 1);
+		check({tag, " ctrl poll burst"}, req_cnt[s], 2);
 		check({tag, " requests/frame"}, req_n >= s + 1 + nlines*bpl, 1);
 		for (l = 0; l < nlines; l = l + 1) begin
 			src = intl ? (2*l + fld) : l;
@@ -203,9 +217,10 @@ initial begin
 	$display("--- phase 0: no writer ---");
 	wait_frames(3);
 	check("idle: active low",            {31'd0, active}, 0);
-	check("idle: only ctrl polls",       req_cnt[req_n-1], 1);
+	check("idle: only ctrl polls",       req_cnt[req_n-1], 2);
 	check("idle: poll addr",             req_addr[req_n-1], CTRL_ADDR);
 
+`ifndef READER_TB_PART2
 	// Phase 1: v2 writer, mode 0, offsets +5/-3, buffer 0.
 	$display("--- phase 1: v2 mode 0 ---");
 	publish(1, 4'd0, 8'sd5, -4'sd3, 1, 0);
@@ -261,6 +276,9 @@ initial begin
 	wait_frames(2);
 	check_frame_fetch("pal", BUF0_V2, 176, 288, 176, 1, 0, fld_a);
 
+`endif
+
+`ifdef READER_TB_PART2
 	// Phase 6: 480i.
 	$display("--- phase 6: v2 mode 1 (480i) ---");
 	publish(1, 4'd1, 8'sd0, 4'sd0, 13, 0);
@@ -311,6 +329,41 @@ initial begin
 	ctrl_q = {32'h5A520000, 30'd20, 1'b0, 1'b0};
 	wait_frames(3);
 	check("unknown magic rejected", {31'd0, active}, 0);
+
+	// Phase 9: interim word2 H size (analog width stretch).
+	$display("--- phase 9: word2 h_size ---");
+	publish(1, 4'd0, 8'sd0, 4'sd0, 21, 0);
+	wait (active === 1'b1);
+	wait_frames(2);
+	check("h_size default 0",            dut.reader.h_size_out, 0);
+	check("h_size top port 0",           dut.vga_h_size, 0);
+	set_word2(1, 8'sd2);
+	wait_frames(2);
+	check("h_size +2 decoded",           dut.reader.h_size_out, 2);
+	check("h_size top port +2",          dut.vga_h_size, 2);
+	set_word2(1, -8'sd8);
+	wait_frames(2);
+	check("h_size -8 decoded",           dut.reader.h_size_out, -8);
+	set_word2(1, 8'sd5);
+	wait_frames(2);
+	check("h_size +5 clamps to +2",      dut.reader.h_size_out, 2);
+	set_word2(1, -8'sd20);
+	wait_frames(2);
+	check("h_size -20 clamps to -8",     dut.reader.h_size_out, -8);
+	set_word2(0, 8'sd2);
+	wait_frames(2);
+	check("wrong word2 magic reads 0",   dut.reader.h_size_out, 0);
+	set_word2(1, -8'sd4);
+	wait_frames(2);
+	check("h_size follows live writer",  dut.reader.h_size_out, -4);
+	ctrl_q = 64'd0;
+	wait_frames(2);
+	check("stopped writer resets h_size", dut.reader.h_size_out, 0);
+	publish(0, 4'd0, 8'sd0, 4'sd0, 22, 0);
+	wait_frames(2);
+	check("no word1 magic keeps h_size 0", dut.reader.h_size_out, 0);
+	ctrl_q2 = 64'd0;
+`endif
 
 	if (errors == 0) $display("ALL CHECKS PASSED");
 	else begin

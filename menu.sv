@@ -86,14 +86,15 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(clk_sys),
-	.outclk_1(),         // stock 27.027 MHz output, unused (see pll_video)
+	.outclk_1(),         // stock 27.027 MHz output, unused (see pll_video54)
 	.locked(locked)
 );
 
-// Exact 27.000000 MHz video clock from its own PLL: 27 MHz can't share a
-// VCO with the 100 MHz clk_sys (lcm = 2700 MHz, above the VCO ceiling).
+// Exact 54.000000 MHz video clock from its own PLL (1350 MHz VCO / 25).
+// 54 MHz gives the analog H-size retimer 8 master clocks per progressive
+// pixel (4 per 480i pixel); it can't share a VCO with the 100 MHz clk_sys.
 wire vid_locked;
-pll_video pll_video
+pll_video54 pll_video54
 (
 	.refclk(CLK_50M),
 	.rst(0),
@@ -321,11 +322,11 @@ end
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
 
-// Pixel clock: CLK_VIDEO = 27.000 MHz (the universal SD video clock).
-// ce_pix /4 = 6.75 MHz gives exactly 15734.27 Hz (NTSC, 429-px line) and
-// 15625.00 Hz (PAL, 432-px line); the 480i mode runs /2 = 13.5 MHz with an
-// 858-px line for the same 15734.27 Hz. Both the cosine fallback and the FB
-// reader use this ce_pix.
+// Pixel clock: CLK_VIDEO = 54.000 MHz (2x the universal SD video clock,
+// for fine-grained analog H-size retiming). ce_pix /8 = 6.75 MHz gives
+// exactly 15734.27 Hz (NTSC, 429-px line) and 15625.00 Hz (PAL, 432-px
+// line); the 480i mode runs /4 = 13.5 MHz with an 858-px line for the same
+// 15734.27 Hz. Both the cosine fallback and the FB reader use this ce_pix.
 wire [1:0] native_mode;
 wire ce_pix;
 zaparoo_pixel_enable pixel_enable (
@@ -350,6 +351,7 @@ wire [8:0] native_vcount;
 wire       native_new_frame;
 wire       native_field;
 wire       native_active;
+wire signed [7:0] native_h_size;
 
 native_video_top native_video
 (
@@ -380,8 +382,23 @@ native_video_top native_video
 	.vga_new_frame  (native_new_frame),
 	.vga_mode       (native_mode),
 	.vga_field      (native_field),
+	.vga_h_size     (native_h_size),
 	.active         (native_active)
 );
+
+// Analog H-size sideband to sys_top's post-OSD retimer. Everything here is
+// CLK_VIDEO-domain and quasi-static (h_size is two-flop synced inside
+// native_video_top, native_mode is the timing module's latched mode), so no
+// new CDC is introduced; hretime latches the controls per line at HSYNC.
+zaparoo_hsize_map hsize_map
+(
+	.mode   (native_mode),
+	.h_size (native_h_size),
+	.enable (CRT_HSIZE_EN),
+	.scale  (CRT_HSIZE_SCALE)
+);
+// (480i bypass is decided here in hsize_map; sys_top's retimer runs at a
+// constant 13.5 MHz sample rate in every mode.)
 
 // Keep upstream's asynchronous noise source and grayscale weighting. Only
 // the frame-phase enable differs: native timing stretches new_frame over
