@@ -12,9 +12,11 @@
 //   word2 [31:0] at 0x08: [31:16] magic 0x5A52, [15:8] reserved 0,
 //   [7:0] signed h_size, clamped here to -8..+2 (analog width stretch in
 //   1/64-pixel-period steps; 0 = retimer bypass). Without the 0x5A52 magic
-//   the field reads as 0, so legacy writers imply unity width. Word2 is
-//   written only by Main (never the frontend, which owns words 0/1), and it
-//   applies only while word1's magic is valid. The deferred v3 protocol
+//   the field reads as 0, so legacy writers imply unity width. Word2 shares
+//   word1's ownership: a running frontend writes it (saved h_size, reserved
+//   byte 0) and Main writes it from its OSD page, test pattern and
+//   post-blank republish, with Main's save respawning the frontend so the
+//   writers never disagree. It applies only while word1's magic is valid. The deferred v3 protocol
 //   (plans/menu-crt-video-plan.md sec. 7) repurposes byte 0x08 and moves
 //   0x5A52 into word1's magic slot; a v3 writer against this reader parks it
 //   safely idle, and matched releases replace this layout wholesale.
