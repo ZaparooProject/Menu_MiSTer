@@ -54,18 +54,15 @@ wire  [1:0] rd_mode;
 wire signed [7:0] rd_h_offset;
 wire signed [5:0] rd_v_offset;
 wire signed [7:0] rd_h_size;
-wire        [5:0] rd_v_extra;
 
 reg [1:0] mode_sync     [1:0];
 reg [7:0] h_offset_sync [1:0];
 reg [5:0] v_offset_sync [1:0];
 reg [7:0] h_size_sync   [1:0];
-reg [5:0] v_extra_sync  [1:0];
 always @(posedge clk_vid) begin
 	mode_sync[0]     <= rd_mode;       mode_sync[1]     <= mode_sync[0];
 	h_offset_sync[0] <= rd_h_offset;   h_offset_sync[1] <= h_offset_sync[0];
 	h_size_sync[0]   <= rd_h_size;     h_size_sync[1]   <= h_size_sync[0];
-	v_extra_sync[0]  <= rd_v_extra;    v_extra_sync[1]  <= v_extra_sync[0];
 	v_offset_sync[0] <= rd_v_offset;   v_offset_sync[1] <= v_offset_sync[0];
 end
 
@@ -77,7 +74,6 @@ native_video_timing timing
 	.mode_in     (mode_sync[1]),
 	.h_offset_in ($signed(h_offset_sync[1])),
 	.v_offset_in ($signed(v_offset_sync[1])),
-	.v_extra_in  (v_extra_sync[1]),
 	.mode        (vga_mode),
 	.field       (tim_field),
 	.hsync       (tim_hs),
@@ -119,7 +115,6 @@ native_video_reader reader
 	.h_offset_out   (rd_h_offset),
 	.v_offset_out   (rd_v_offset),
 	.h_size_out     (rd_h_size),
-	.v_extra_out    (rd_v_extra),
 
 	.r_out          (vga_r),
 	.g_out          (vga_g),

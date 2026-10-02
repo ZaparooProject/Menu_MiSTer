@@ -21,7 +21,6 @@ reg reset = 1;
 reg        [1:0] mode_in     = 2'd0;
 reg signed [7:0] h_offset_in = 8'sd0;
 reg signed [5:0] v_offset_in = 6'sd0;
-reg        [5:0] v_extra_in  = 6'd0;
 
 wire [1:0] mode;
 wire       field, hsync, vsync, hblank, vblank, de, new_frame, new_line;
@@ -45,7 +44,6 @@ native_video_timing dut
 	.mode_in     (mode_in),
 	.h_offset_in (h_offset_in),
 	.v_offset_in (v_offset_in),
-	.v_extra_in  (v_extra_in),
 	.mode        (mode),
 	.field       (field),
 	.hsync       (hsync),
@@ -225,35 +223,6 @@ initial begin
 	h_offset_in = 8'sd0;
 	v_offset_in = 6'sd0;
 
-	// ---- vertical shrink: extra blank lines (frame rate only) -----------
-	$display("--- v_extra blank lines ---");
-	v_extra_in = 6'd32;  settle(4);
-	check("N=32 field period",          vs_period, 429*294);
-	check("N=32 vsync width",           vs_width, 429*3);
-	check("N=32 active lines",          de_lines_last, 240);
-	check("N=32 line period",           hs_period, 429);
-	check("N=32 vsync->active",         vs_to_de, 429*35);
-	v_extra_in = 6'd5;   settle(4);
-	check("N=5 (odd) field period",     vs_period, 429*267);
-	check("N=5 front split floor(N/2)", vs_to_de, 429*22);
-	v_extra_in = 6'd63;  settle(4);
-	check("N=63 clamps to 32",          vs_period, 429*294);
-	v_extra_in = 6'd32;
-	v_offset_in = -6'sd14; settle(4);
-	check("N=32 + v=-14 period",        vs_period, 429*294);
-	check("N=32 + v=-14 vsync->active", vs_to_de, 429*21);
-	v_offset_in = 6'sd0;
-	mode_in = 2'd2;      settle(4);
-	check("pal N=32 field period",      vs_period, 432*344);
-	check("pal N=32 active lines",      de_lines_last, 288);
-	check("pal N=32 vsync->active",     vs_to_de, 432*37);
-	mode_in = 2'd1;      settle(5);
-	check("480i ignores N: field A",    vs_period, 225225);
-	check("480i ignores N: field B",    vs_period_d, 225225);
-	check("480i ignores N: lines",      de_lines_last, 240);
-	mode_in = 2'd0;
-	v_extra_in = 6'd0;
-
 	// ---- mode change sanity: back to NTSC after everything --------------
 	settle(4);
 	check("ntsc restore line period",   hs_period, 429);
@@ -269,7 +238,7 @@ initial begin
 end
 
 initial begin
-	#4_000_000_000;  // 2 s simulated-time guard
+	#2_000_000_000;  // 2 s simulated-time guard
 	$display("TIMEOUT");
 	$fatal(1);
 end

@@ -4,9 +4,6 @@
 //   mode 1: 720x480i60 (CEA-861) ce_pix = 27/2 = 13.5 MHz, 858x525,  15734.27 Hz
 //   mode 2: 352x288p50 (PAL)     ce_pix = 27/4 = 6.75 MHz, 432x312,  15625.00 Hz
 //
-// v_extra_in adds 0..32 blank lines per progressive frame (vertical shrink
-// via frame rate: totals become 262+N / 312+N), split floor(N/2) front /
-// ceil(N/2) back around the sync; 480i forces N = 0.
 // mode_in/h_offset_in/v_offset_in are quasi-static (two-flop synchronized by
 // the caller) and are latched here at the field wrap so a mid-frame update
 // can't corrupt sync. Offsets shift the image by repartitioning front/back
@@ -23,9 +20,6 @@ module native_video_timing
 	input  wire        [1:0] mode_in,
 	input  wire signed [7:0] h_offset_in,  // + = right, honored -31..+9 px
 	input  wire signed [5:0] v_offset_in,  // + = down,  honored -14..+2 lines
-	input  wire        [5:0] v_extra_in,   // extra blank lines, honored 0..32;
-	                                       // vertical shrink by lowering the
-	                                       // frame rate, progressive only
 
 	output reg  [1:0] mode,    // latched active mode; selects the ce_pix divider
 	output reg        field,   // 480i field number, 0 in progressive modes
@@ -85,25 +79,14 @@ function automatic signed [5:0] clamp_v(input signed [5:0] v);
 	else                 clamp_v = v;
 endfunction
 
-function automatic [5:0] clamp_ve(input [5:0] v);
-	clamp_ve = (v > 6'd32) ? 6'd32 : v;
-endfunction
-
 reg signed [7:0] h_offset;
 reg signed [5:0] v_offset;
-// Latched extra blank lines (N): floor(N/2) extends the front blanking
-// (sync starts later), the rest lands in the back blanking because the
-// field wrap moves to V_TOTAL + N. Active lines, sync width and all
-// horizontal timing are untouched, so only the frame rate drops. 480i
-// forces N = 0 at the latch.
-reg        [5:0] v_extra;
-wire       [8:0] V_TOTAL_EFF = V_TOTAL + {3'd0, v_extra};
 
 // Sync starts shift with the offset; two's-complement subtraction in
 // unsigned arithmetic yields the correct result at both ends of the range.
 wire [9:0] H_SYNC_START = H_ACTIVE + (H_FP - {{2{h_offset[7]}}, h_offset});
 wire [9:0] H_SYNC_END   = H_SYNC_START + H_SYNC;
-wire [8:0] V_SYNC_START = V_ACTIVE + {4'd0, v_extra[5:1]} + (V_FP - {{3{v_offset[5]}}, v_offset});
+wire [8:0] V_SYNC_START = V_ACTIVE + (V_FP - {{3{v_offset[5]}}, v_offset});
 wire [8:0] V_SYNC_END   = V_SYNC_START + V_SYNC;
 
 // In 480i the odd field's vsync transitions half a scanline (H_TOTAL/2
@@ -117,7 +100,7 @@ wire       vs_step = field ? (hcount == (H_TOTAL >> 1) - 10'd1)
 wire [8:0] vs_line = field ? vcount : (vcount + 9'd1);
 
 wire line_wrap  = (hcount == H_TOTAL - 10'd1);
-wire field_wrap = line_wrap && (vcount == V_TOTAL_EFF - 9'd1);
+wire field_wrap = line_wrap && (vcount == V_TOTAL - 9'd1);
 
 always @(posedge clk) begin
 	if(reset) begin
@@ -125,7 +108,6 @@ always @(posedge clk) begin
 		field     <= 1'b0;
 		h_offset  <= 8'sd0;
 		v_offset  <= 6'sd0;
-		v_extra   <= 6'd0;
 		hcount    <= 10'd0;
 		vcount    <= 9'd0;
 		hsync     <= 1'b0;
@@ -145,7 +127,7 @@ always @(posedge clk) begin
 
 		if(line_wrap) begin
 			hcount <= 10'd0;
-			if(vcount == V_TOTAL_EFF - 9'd1) vcount <= 9'd0;
+			if(vcount == V_TOTAL - 9'd1) vcount <= 9'd0;
 				else vcount <= vcount + 9'd1;
 		end
 		else begin
@@ -159,7 +141,6 @@ always @(posedge clk) begin
 			if(next_mode != MODE_480I) field <= 1'b0;
 			h_offset <= clamp_h(h_offset_in);
 			v_offset <= clamp_v(v_offset_in);
-			v_extra  <= (next_mode == MODE_480I) ? 6'd0 : clamp_ve(v_extra_in);
 		end
 
 		if(hcount == H_ACTIVE - 10'd1) hblank <= 1'b1;
@@ -175,7 +156,7 @@ always @(posedge clk) begin
 
 		if(line_wrap) begin
 			if(vcount == V_ACTIVE - 9'd1) vblank <= 1'b1;
-				else if(vcount == V_TOTAL_EFF - 9'd1) vblank <= 1'b0;
+				else if(vcount == V_TOTAL - 9'd1) vblank <= 1'b0;
 		end
 
 		if(hcount == H_ACTIVE - 10'd1) new_line <= 1'b1;
@@ -197,7 +178,7 @@ always @(posedge clk) begin
 		next_vblank = vblank;
 		if(line_wrap) begin
 			if(vcount == V_ACTIVE - 9'd1) next_vblank = 1'b1;
-				else if(vcount == V_TOTAL_EFF - 9'd1) next_vblank = 1'b0;
+				else if(vcount == V_TOTAL - 9'd1) next_vblank = 1'b0;
 		end
 
 		de <= ~next_hblank & ~next_vblank;

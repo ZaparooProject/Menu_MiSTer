@@ -151,11 +151,10 @@ task publish(input bit magic, input [3:0] pmode, input signed [7:0] hoff,
 	end
 endtask
 
-// Publish the interim analog size word2 in the second control beat:
-// [15:8] signed v_size (-32..0), [7:0] signed h_size.
-task set_word2(input bit magic, input signed [7:0] size, input signed [7:0] vsize);
+// Publish the interim analog H-size word2 in the second control beat.
+task set_word2(input bit magic, input signed [7:0] size);
 	begin
-		ctrl_q2 = {32'd0, magic ? 16'h5A52 : 16'hBEEF, vsize, size};
+		ctrl_q2 = {32'd0, magic ? 16'h5A52 : 16'hBEEF, 8'h00, size};
 	end
 endtask
 
@@ -338,33 +337,23 @@ initial begin
 	wait_frames(2);
 	check("h_size default 0",            dut.reader.h_size_out, 0);
 	check("h_size top port 0",           dut.vga_h_size, 0);
-	set_word2(1, 8'sd2, 8'sd0);
+	set_word2(1, 8'sd2);
 	wait_frames(2);
 	check("h_size +2 decoded",           dut.reader.h_size_out, 2);
 	check("h_size top port +2",          dut.vga_h_size, 2);
-	set_word2(1, -8'sd8, 8'sd0);
+	set_word2(1, -8'sd8);
 	wait_frames(2);
 	check("h_size -8 decoded",           dut.reader.h_size_out, -8);
-	set_word2(1, 8'sd5, 8'sd0);
+	set_word2(1, 8'sd5);
 	wait_frames(2);
 	check("h_size +5 clamps to +2",      dut.reader.h_size_out, 2);
-	set_word2(1, -8'sd20, 8'sd0);
+	set_word2(1, -8'sd20);
 	wait_frames(2);
 	check("h_size -20 clamps to -8",     dut.reader.h_size_out, -8);
-	set_word2(0, 8'sd2, 8'sd0);
+	set_word2(0, 8'sd2);
 	wait_frames(2);
 	check("wrong word2 magic reads 0",   dut.reader.h_size_out, 0);
-	set_word2(1, 8'sd0, -8'sd8);
-	wait_frames(2);
-	check("v_size -8 decodes to N=8",    dut.reader.v_extra_out, 8);
-	check("v_extra reaches timing",      dut.timing.v_extra, 8);
-	set_word2(1, 8'sd0, -8'sd40);
-	wait_frames(2);
-	check("v_size -40 clamps to N=32",   dut.reader.v_extra_out, 32);
-	set_word2(1, 8'sd0, 8'sd5);
-	wait_frames(2);
-	check("positive v_size reads N=0",   dut.reader.v_extra_out, 0);
-	set_word2(1, -8'sd4, 8'sd0);
+	set_word2(1, -8'sd4);
 	wait_frames(2);
 	check("h_size follows live writer",  dut.reader.h_size_out, -4);
 	ctrl_q = 64'd0;
