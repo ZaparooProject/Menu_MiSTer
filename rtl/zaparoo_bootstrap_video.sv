@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Native CRT frames take priority; idle stays black except behind stock OSD.
+// Native CRT frames take priority; idle is black unless show_snow is set
+// (see zaparoo_snow_enable).
 `timescale 1ns/1ps
 module zaparoo_bootstrap_video (
     input wire native_active,

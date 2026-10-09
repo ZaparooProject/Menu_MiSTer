@@ -7,8 +7,11 @@ the core itself: 352x240p60 (NTSC) by default, with 720x480i60 and 352x288p50
 (PAL) selectable by the ARM-side launcher through a DDR control block (see
 [DDR contract](rtl/native_video_reader.sv)). There are no video options in the OSD — the
 mode and the H/V centering trims are owned by the launcher. Idle video stays
-black during frontend handoff; upstream-style snow appears behind the stock
-OSD. Native frontend frames take priority over both backgrounds.
+black during frontend handoff. Upstream-style snow appears behind the stock
+OSD, and whenever Main sets `status[10]` to report that no frontend owns or
+is about to take the screen (frontend off, quit, or given up), so a setup
+with no frontend and no OSD, such as kiosk mode, still shows snow. Native
+frontend frames take priority over both backgrounds.
 
 Native writers must use the v2 magic and publish a live frame counter. The
 legacy 320-pixel, no-magic DDR contract is no longer accepted.
