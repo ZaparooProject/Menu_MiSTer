@@ -320,6 +320,8 @@ end
 
 wire FB  = status[5];
 wire [2:0] led = status[8:6];
+// Set by Main while no frontend owns or is about to take the screen.
+wire snow_allowed = status[10];
 
 // Pixel clock: CLK_VIDEO = 27.000 MHz (the universal SD video clock).
 // ce_pix /4 = 6.75 MHz gives exactly 15734.27 Hz (NTSC, 429-px line) and
@@ -402,26 +404,27 @@ zaparoo_snow_phase snow_motion (
 	.new_frame(native_new_frame), .vcount(native_vcount), .phase(snow_phase)
 );
 
-// OSD status comes from the HDMI domain. Main disables OSD before handing
-// video to the frontend, so startup stays black without a new bus command.
-(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED_IF_ASYNCHRONOUS" *)
-reg [1:0] snow_osd_sync = 0;
 always @(posedge CLK_VIDEO) begin
-	if (RESET | ~vid_locked) begin
-		snow_sample <= 0;
-		snow_osd_sync <= 0;
-	end else begin
-		if (ce_pix) snow_sample <= snow_random[2:0];
-		snow_osd_sync <= {snow_osd_sync[0], OSD_STATUS};
-	end
+	if (RESET | ~vid_locked) snow_sample <= 0;
+	else if (ce_pix) snow_sample <= snow_random[2:0];
 end
 
-// Black handoff, snow behind stock OSD, or native frontend RGB. All three
-// share the same native sync/DE; no video-mode switch is needed.
+// Snow shows behind the stock OSD, and whenever Main reports that no frontend
+// will draw. Main disables the OSD and leaves status[10] clear before handing
+// video to the frontend, so that startup stays black.
+wire show_snow;
+zaparoo_snow_enable snow_enable (
+	.clk(CLK_VIDEO), .reset(RESET | ~vid_locked),
+	.osd_status(OSD_STATUS), .snow_allowed(snow_allowed),
+	.show_snow(show_snow)
+);
+
+// Black handoff, snow, or native frontend RGB. All three share the same
+// native sync/DE; no video-mode switch is needed.
 zaparoo_bootstrap_video bootstrap_video (
 	.native_active(native_active),
 	.native_rgb({native_r, native_g, native_b}),
-	.show_snow(snow_osd_sync[1]),
+	.show_snow(show_snow),
 	.snow_rgb({snow_pixel, snow_pixel, snow_pixel}),
 	.de_in(native_de), .hs_in(native_hs), .vs_in(native_vs),
 	.rgb_out({VGA_R, VGA_G, VGA_B}),
