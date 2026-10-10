@@ -175,7 +175,7 @@ def package(manifest_path, official, kernel_build, module_source, output):
     prefix = f'modules/{release}/{manifest["stock_kernel_build_id"]}/'
     profile = '\n'.join(['ZAPAROO-SCANOUT-PROFILE-1', release, manifest['stock_kernel_build_id'],
                          module_id, sha(module), manifest['kernel_revision'],
-                         'zaparoo-scanout-v1-1080p', ''])
+                         'zaparoo-scanout-v2-native', ''])
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(prefix + 'profile', profile)
