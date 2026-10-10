@@ -37,7 +37,7 @@ def package(kernel_build, module, output):
         raise ValueError('unexpected vermagic')
     kernel_id, module_id = build_id(kernel_build / 'vmlinux'), build_id(module)
     profile = '\n'.join(['ZAPAROO-SCANOUT-PROFILE-1', release, kernel_id,
-                         module_id, digest(module), revision, 'zaparoo-scanout-v1-1080p', ''])
+                         module_id, digest(module), revision, 'zaparoo-scanout-v2-native', ''])
     provenance = {
         'schema': 1, 'kernel_revision': revision,
         'kernel_build_id': kernel_id, 'module_build_id': module_id,

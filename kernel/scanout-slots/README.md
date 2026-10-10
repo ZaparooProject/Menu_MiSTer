@@ -3,9 +3,9 @@
 This GPL-3.0-or-later component derives from Nigel Breslaw's MagiK scanout-slot
 module and the Zaparoo demo's 1080p extension. Keep its source and attribution
 with this Menu fork. It is a separate kernel artifact, not linked into the
-frontend. Source imports retain their original license; the Linux module
-loader's license classification is separate and must not be changed to gain
-access to GPL-only kernel exports.
+frontend. The module declares `MODULE_LICENSE("GPL")`: the native vertical-sync
+wait maps and requests an interrupt, and the kernel exports those helpers to
+GPL modules only.
 
 ## Compatibility policy
 
@@ -101,22 +101,37 @@ with Rust 1.95.0 installed and a separate `BUILD_ROOT`. That retains the older
 profile. Never suppress modpost errors or substitute `modules_prepare` for the
 full build that creates genuine symbol exports.
 
-ABI v1 uses `/dev/zaparoo-scanout`, ioctl `_IOR('Z', 1, layout)` and a 64-byte
+ABI v2 uses `/dev/zaparoo-scanout`, ioctl `_IOR('Z', 1, layout)` and a 64-byte
 layout. Slots start at `0x23000000` and `0x23400000`, outside the complete
 `MiSTer_fb` DT aperture (`0x22000000`, 8 MiB). Each has 4,147,200 usable bytes
 and a 4,149,248-byte mapping. Slot-one mmap selector is 8,294,400, **not its
 physical address**. Only exact shared read/write mappings are accepted;
 executable mappings and fork inheritance are disabled.
 
+v2 adds Menu's native video window (`0x3A000000`, 3 MiB, the DDR contract in
+`rtl/native_video_reader.sv`) as two more exact-length mappings whose selectors
+and sizes the layout reports: the 4 KiB control page, uncached, and the
+3,137,536 bytes of frame slots after it, write-combined. The control words stay
+uncached so a publish can never wait in a write-combining buffer behind the
+pixels it announces. The window is reserved by its first mapping, not at open,
+so an HDMI-only client never claims it.
+
+`_IOR('Z', 2, __u32)` blocks until the native raster's next vertical sync and
+returns a running count, or fails with `ETIMEDOUT` after 50 ms. The source is
+`sys_top`'s `video_sync` pulse on `f2h_irq[1]` (GIC SPI 41), beside the HDMI
+interrupt `MiSTer_fb` owns on SPI 40. The stock device tree has no node for it,
+so the module maps it on `MiSTer_fb`'s interrupt controller itself. The
+interrupt is requested by the first wait and freed with the last file
+reference; idle residency holds no interrupt.
+
 6.18 compatibility decisions:
 
 - `registered_fb` is no longer exported. Validate the pinned root-level DT
   aperture instead of linking to that private symbol.
 - `no_llseek` is gone; use a NULL file-operation entry.
-- Published-VMA setters require GPL-only locking helpers. The pinned kernel
-  invokes `.mmap` on a newly allocated VMA before insertion into the tree, so
-  initialize its flags with `vm_flags_init`. Recheck this ordering for a new
-  kernel; do not change the loader license marker to bypass modpost.
+- The pinned kernel invokes `.mmap` on a newly allocated VMA before insertion
+  into the tree, so initialize its flags with `vm_flags_init`. Recheck this
+  ordering for a new kernel.
 
 Successful compilation is **not hardware qualification**. Before installing
 or distributing the artifact, verify the matched Main/frontend/Menu stack on
@@ -133,7 +148,7 @@ disk: the running kernel may still precede an update awaiting reboot.
 `kernel/.build/ci/zaparoo-scanout.zip` (`package-scanout.py` remains the prototype
 packager). Each profile is installed under
 `zaparoo/modules/<kernel-release>/<GNU-kernel-build-id>/`. The profile contains
-the module build ID, SHA-256, kernel revision, and Zaparoo's v1 1080p contract
+the module build ID, SHA-256, kernel revision, and Zaparoo's v2 native contract
 identifier. The ZIP also carries kernel config/symbol-table checksums and matching
 module sources with their existing attribution. Do not strip or rewrite the
 module after packaging. This is integrity/provenance, not a signature.
