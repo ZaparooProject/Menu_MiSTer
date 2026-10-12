@@ -29,14 +29,14 @@ module bootstrap_video_tb;
         native_active = 0; #1;
         assert(rgb_out == 0) else $fatal(1, "writer stop did not restore black");
         show_snow = 1; de_in = 1; #1;
-        assert(rgb_out == snow_rgb) else $fatal(1, "OSD did not reveal snow");
+        assert(rgb_out == snow_rgb) else $fatal(1, "show_snow did not reveal snow");
         de_in = 0; #1;
         assert(rgb_out == 0) else $fatal(1, "snow painted outside DE");
         native_active = 1; #1;
         assert(rgb_out == native_rgb) else $fatal(1, "snow covered native frontend");
         native_active = 0; show_snow = 0; de_in = 1; #1;
-        assert(rgb_out == 0) else $fatal(1, "OSD close did not restore black");
-        $display("PASS: black handoff, OSD snow, native CRT priority and timing");
+        assert(rgb_out == 0) else $fatal(1, "clearing show_snow did not restore black");
+        $display("PASS: black handoff, snow, native CRT priority and timing");
         $finish;
     end
 endmodule

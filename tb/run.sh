@@ -19,6 +19,8 @@ run_test bootstrap_video_tb \
 
 run_test snow_phase_tb ../rtl/zaparoo_snow_phase.sv snow_phase_tb.sv
 
+run_test snow_enable_tb ../rtl/zaparoo_snow_enable.sv snow_enable_tb.sv
+
 run_test pixel_enable_tb ../rtl/zaparoo_pixel_enable.sv pixel_enable_tb.sv
 
 run_test scanout_tb \
