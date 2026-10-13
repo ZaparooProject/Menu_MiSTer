@@ -1480,9 +1480,11 @@ scanlines #(0) VGA_scanlines
 	.ce_out(vga_ce_sl)
 );
 
-wire [23:0] vga_data_osd;
-wire        vga_vs_osd, vga_hs_osd, vga_de_osd;
-osd vga_osd
+wire [23:0] vga_data_osd0;
+wire        vga_vs_osd0, vga_hs_osd0, vga_de_osd0;
+// Pin the OSD dot width at the 54 MHz clock (see FIXED_PIXSZ in osd.v);
+// the HDMI instance keeps measuring, its scaled stream is 1 clk/pixel.
+osd #(.FIXED_PIXSZ(4)) vga_osd
 (
 	.clk_sys(clk_sys),
 
@@ -1497,6 +1499,46 @@ osd vga_osd
 	.vs_in(vga_vs_sl),
 	.de_in(vga_de_sl),
 
+	.dout(vga_data_osd0),
+	.hs_out(vga_hs_osd0),
+	.vs_out(vga_vs_osd0),
+	.de_out(vga_de_osd0)
+);
+
+// The retimer samples at a constant 13.5 MHz (clk_vid/4): one 480i pixel,
+// or half a progressive pixel = one OSD dot (osd.v FIXED_PIXSZ). Sampling
+// at the OSD dot rate carries the OSD's half-pixel glyph strokes through
+// the retimer intact; a pixel-rate CE keeps only one of the two dots per
+// pixel and decimates the OSD font. Dot and pixel grids are phase-stable
+// against this free-running divider, so each dot is sampled exactly once.
+reg [1:0] vga_ce_dot_div = 0;
+always @(posedge clk_vid) vga_ce_dot_div <= vga_ce_dot_div + 1'd1;
+wire vga_ce_dot = (vga_ce_dot_div == 2'd0);
+
+// Menu-fork analog H-size retimer (rtl/zaparoo_hretime.sv). Analog branch
+// only: csync/YC/RGB and direct video below all consume its outputs under
+// the original vga_*_osd names; the HDMI/ascal tap is upstream of the OSD
+// and is untouched. Controls come from the emu sideband (CLK_VIDEO domain,
+// quasi-static; hretime latches them per line at HSYNC).
+wire        crt_hsize_en;
+wire signed [3:0] crt_hsize_scale;
+wire [23:0] vga_data_osd;
+wire        vga_vs_osd, vga_hs_osd, vga_de_osd;
+zaparoo_hretime vga_hretime
+(
+	.clk(clk_vid),
+	.reset(reset),
+	.ce_in(vga_ce_dot),
+	.enable(crt_hsize_en),
+	// Base 4 clocks per sample in every mode (the proven 480i cadence);
+	// 480i gating happens upstream in zaparoo_hsize_map.
+	.mode(2'd1),
+	.scale(crt_hsize_scale),
+	.din(vga_data_osd0),
+	.hs_in(vga_hs_osd0),
+	.vs_in(vga_vs_osd0),
+	.de_in(vga_de_osd0),
+	.ce_out(),
 	.dout(vga_data_osd),
 	.hs_out(vga_hs_osd),
 	.vs_out(vga_vs_osd),
@@ -1852,6 +1894,8 @@ emu emu
 	.VGA_DE(de_emu),
 	.VGA_F1(f1),
 	.VGA_SCALER(vga_force_scaler),
+	.CRT_HSIZE_EN(crt_hsize_en),
+	.CRT_HSIZE_SCALE(crt_hsize_scale),
 
 `ifndef MISTER_DUAL_SDRAM
 	.VGA_DISABLE(VGA_DISABLE),

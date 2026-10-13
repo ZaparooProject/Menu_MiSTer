@@ -8,6 +8,19 @@
 //   mode: 0 = 352x240p60, 1 = 720x480i60, 2 = 352x288p50 (+v = down)
 //   0x3A001000: buffer 0   0x3A180000: buffer 1   (tight stride, width*4 B)
 //
+// Interim H-size extension: the poll reads a SECOND beat (bytes 0x08-0x0F).
+//   word2 [31:0] at 0x08: [31:16] magic 0x5A52, [15:8] reserved 0,
+//   [7:0] signed h_size, clamped here to -8..+2 (analog width stretch in
+//   1/64-pixel-period steps; 0 = retimer bypass). Without the 0x5A52 magic
+//   the field reads as 0, so legacy writers imply unity width. Word2 shares
+//   word1's ownership: a running frontend writes it (saved h_size, reserved
+//   byte 0) and Main writes it from its OSD page, test pattern and
+//   post-blank republish, with Main's save respawning the frontend so the
+//   writers never disagree. It applies only while word1's magic is valid. The deferred v3 protocol
+//   (plans/menu-crt-video-plan.md sec. 7) repurposes byte 0x08 and moves
+//   0x5A52 into word1's magic slot; a v3 writer against this reader parks it
+//   safely idle, and matched releases replace this layout wholesale.
+//
 // The magic is mandatory, and a block is only painted once the writer has
 // been shown to be live. Nothing clears DDR on this core's startup, so a
 // previous core's leftovers sit at CTRL_ADDR looking like a control block;
@@ -50,6 +63,7 @@ module native_video_reader
 	output reg   [1:0] mode_out,
 	output reg signed [7:0] h_offset_out,
 	output reg signed [5:0] v_offset_out,
+	output reg signed [7:0] h_size_out,
 
 	output reg   [7:0] r_out,
 	output reg   [7:0] g_out,
@@ -125,6 +139,8 @@ localparam [3:0] ST_WAIT_DISPLAY = 4'd7;
 reg  [3:0]  state;
 reg  [31:0] ctrl_word;
 reg  [31:0] ctrl_word1;
+reg  [31:0] ctrl_word2;
+reg         ctrl_beat;
 reg  [29:0] prev_frame_counter;
 reg  [28:0] buf_base_addr;
 reg  [8:0]  cur_line;
@@ -158,6 +174,14 @@ wire signed [3:0] legacy_v = $signed(ctrl_word1[7:4]);
 // Preserve legacy clamp semantics while extended writers use wider porches.
 wire signed [7:0] legacy_h = (ctrl_h > 8'sd8) ? 8'sd8 : (ctrl_h < -8'sd8) ? -8'sd8 : ctrl_h;
 
+// Interim word2 H size: only meaningful under its own magic; clamp to the
+// qualified analog range (positive growth is porch-limited, see hretime).
+wire              word2_ok  = (ctrl_word2[31:16] == 16'h5A52);
+wire signed [7:0] raw_hsize = $signed(ctrl_word2[7:0]);
+wire signed [7:0] ctrl_hsize = !word2_ok ? 8'sd0 :
+                               (raw_hsize > 8'sd2)  ? 8'sd2 :
+                               (raw_hsize < -8'sd8) ? -8'sd8 : raw_hsize;
+
 // 480i: source line = displayed line * 2 + field, from one progressive frame.
 wire [8:0]  src_line  = scan_interlaced ? ({cur_line[7:0], 1'b0} + {8'd0, field_ddr}) : cur_line;
 wire [28:0] line_base = buf_base_addr + src_line * line_words;
@@ -175,6 +199,8 @@ always @(posedge ddr_clk) begin
 		ddr_addr           <= 29'd0;
 		ctrl_word          <= 32'd0;
 		ctrl_word1         <= 32'd0;
+		ctrl_word2         <= 32'd0;
+		ctrl_beat          <= 1'b0;
 		prev_frame_counter <= 30'd0;
 		buf_base_addr      <= BUF0_V2;
 		cur_line           <= 9'd0;
@@ -191,6 +217,7 @@ always @(posedge ddr_clk) begin
 		mode_out           <= 2'd0;
 		h_offset_out       <= 8'sd0;
 		v_offset_out       <= 6'sd0;
+		h_size_out         <= 8'sd0;
 		line_words         <= 9'd160;
 		scan_lines         <= 9'd240;
 		scan_interlaced    <= 1'b0;
@@ -216,17 +243,23 @@ always @(posedge ddr_clk) begin
 			ST_POLL_CTRL: begin
 				if(!ddr_busy) begin
 					ddr_addr     <= CTRL_ADDR;
-					ddr_burstcnt <= 8'd1;
+					ddr_burstcnt <= 8'd2;
 					ddr_rd       <= 1'b1;
+					ctrl_beat    <= 1'b0;
 					timeout_cnt  <= 20'd0;
 					state        <= ST_WAIT_CTRL;
 				end
 			end
 
 			ST_WAIT_CTRL: begin
-				if(ddr_dout_ready) begin
+				if(ddr_dout_ready && !ctrl_beat) begin
 					ctrl_word   <= ddr_dout[31:0];
 					ctrl_word1  <= ddr_dout[63:32];
+					ctrl_beat   <= 1'b1;
+					timeout_cnt <= 20'd0;
+				end
+				else if(ddr_dout_ready) begin
+					ctrl_word2  <= ddr_dout[31:0];
 					timeout_cnt <= 20'd0;
 					state       <= ST_CHECK_CTRL;
 				end
@@ -254,6 +287,7 @@ always @(posedge ddr_clk) begin
 					mode_out           <= 2'd0;
 					h_offset_out       <= 8'sd0;
 					v_offset_out       <= 6'sd0;
+					h_size_out         <= 8'sd0;
 					state              <= ST_IDLE;
 				end
 				else begin
@@ -261,6 +295,7 @@ always @(posedge ddr_clk) begin
 					h_offset_out <= extended ? ctrl_h : legacy_h;
 					v_offset_out <= extended ? $signed(ctrl_word1[7:2]) :
 					                (legacy_v > 4'sd2 ? 6'sd2 : {{2{legacy_v[3]}}, legacy_v});
+					h_size_out   <= ctrl_hsize;
 					line_words   <= (ctrl_mode == 2'd1) ? 9'd360 : 9'd176;
 					scan_lines   <= (ctrl_mode == 2'd2) ? 9'd288 : 9'd240;
 					scan_interlaced <= (ctrl_mode == 2'd1);

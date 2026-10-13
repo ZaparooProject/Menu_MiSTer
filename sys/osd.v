@@ -22,6 +22,13 @@ module osd
 );
 
 parameter  OSD_COLOR    =  3'd4;
+// Nonzero: fixed video clocks per OSD dot, skipping the DE-width
+// measurement. The measurement picks floor(active_width/512), which at the
+// Menu core's 54 MHz video clock lands on 5 clocks against 8-clock pixels:
+// the 5:8 beat makes glyph strokes alternate width. Pinning the analog
+// instance to 4 restores the 27 MHz look (half a progressive pixel, one
+// 480i pixel, per OSD dot).
+parameter  FIXED_PIXSZ  = 0;
 
 localparam OSD_WIDTH    = 12'd256;
 localparam OSD_HEIGHT   = 12'd64;
@@ -115,7 +122,8 @@ always @(posedge clk_video) begin
 	if(~deD && de_in) cnt <= 0;
 
 	if(deD && ~de_in) begin
-		pixsz  <= (((cnt+1'b1) >> (9-rot[0])) > 1) ? (((cnt+1'b1) >> (9-rot[0])) - 1'd1) : 22'd0;
+		pixsz  <= (FIXED_PIXSZ != 0) ? FIXED_PIXSZ - 1 :
+		          (((cnt+1'b1) >> (9-rot[0])) > 1) ? (((cnt+1'b1) >> (9-rot[0])) - 1'd1) : 22'd0;
 		pixcnt <= 0;
 	end
 end
