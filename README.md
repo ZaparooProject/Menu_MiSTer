@@ -31,7 +31,7 @@ feeds a 31 kHz-only monitor, set `vga_scaler=1` in MiSTer.ini instead.
 
 Install Icarus Verilog 12 and GNU coreutils, then run `sh tb/run.sh` from the
 repository root. CI runs the same native timing, DDR reader, scanout latch,
-snow cadence and bootstrap-black suites on Ubuntu 24.04. Assertions, compilation failures,
+snow cadence, snow noise and bootstrap-black suites on Ubuntu 24.04. Assertions, compilation failures,
 and a 600-second timeout per simulation fail the run. Generated simulators
 stay in ignored `test-output/rtl/`.
 
