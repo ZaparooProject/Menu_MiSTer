@@ -402,29 +402,25 @@ zaparoo_hsize_map hsize_map
 // (480i bypass is decided here in hsize_map; sys_top's retimer runs at a
 // constant 13.5 MHz sample rate in every mode.)
 
-// Keep upstream's asynchronous noise source and grayscale weighting. Only
-// the frame-phase enable differs: native timing stretches new_frame over
-// several video clocks, so it must be sampled on ce_pix, not every clock.
-wire [62:0] snow_random;
-reg [2:0] snow_sample = 0;
+// Upstream's cosine wave and grayscale math, with a clocked noise source so
+// the static looks the same on every build. native timing stretches new_frame
+// over several video clocks, so the phase is sampled on ce_pix.
+wire [5:0] snow_noise;
 wire [9:0] snow_phase;
 wire [7:0] snow_cos;
 wire [5:0] snow_level = {1'b0, snow_cos[7:3]} + 6'd32;
-wire [5:0] snow_noise = {snow_sample[0], snow_sample[1], {4{snow_sample[2]}}};
 wire [7:0] snow_pixel = (snow_level >= snow_noise) ?
 	{snow_level - snow_noise, 2'b00} : 8'd0;
 
-lfsr #(.N(63)) snow_source(snow_random);
+zaparoo_snow_noise snow_source (
+	.clk(CLK_VIDEO), .reset(RESET | ~vid_locked), .ce_pix(ce_pix),
+	.noise(snow_noise)
+);
 cos snow_wave(snow_phase, snow_cos);
 zaparoo_snow_phase snow_motion (
 	.clk(CLK_VIDEO), .reset(RESET | ~vid_locked), .ce_pix(ce_pix),
 	.new_frame(native_new_frame), .vcount(native_vcount), .phase(snow_phase)
 );
-
-always @(posedge CLK_VIDEO) begin
-	if (RESET | ~vid_locked) snow_sample <= 0;
-	else if (ce_pix) snow_sample <= snow_random[2:0];
-end
 
 // Snow shows behind the stock OSD, and whenever Main reports that no frontend
 // will draw. Main disables the OSD and leaves status[10] clear before handing
